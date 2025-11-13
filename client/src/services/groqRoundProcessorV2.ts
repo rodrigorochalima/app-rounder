@@ -109,7 +109,7 @@ RESPONDA APENAS COM O CONTEÚDO ATUALIZADO DO LEITO, SEM EXPLICAÇÕES.`;
       { role: 'system', content: 'Você é um assistente médico preciso e objetivo.' },
       { role: 'user', content: prompt }
     ],
-    model: 'llama-3.1-70b-versatile',
+    model: 'llama-3.3-70b-versatile',
     temperature: 0.2,
     max_tokens: 1500,
   });

@@ -248,7 +248,7 @@ Comece com o cabeçalho atualizado e processe todos os leitos em ordem.`;
           content: prompt,
         },
       ],
-      model: 'llama-3.1-70b-versatile', // Modelo com contexto de 128k tokens
+      model: 'llama-3.3-70b-versatile', // Modelo mais recente e ativo
       temperature: 0.3, // Baixa temperatura para maior precisão
       max_tokens: 4000,
     });
