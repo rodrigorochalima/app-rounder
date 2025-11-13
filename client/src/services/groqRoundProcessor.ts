@@ -135,8 +135,8 @@ export async function processarRoundComGroq(params: ProcessarRoundParams): Promi
     const textoAnterior = await extrairTextoDocx(documentoAnterior);
     const textoTranscricao = await extrairTextoDocx(transcricao);
 
-    // Montar prompt com todas as regras
-    const prompt = `# TAREFA: Atualizar Documento de Round Médico da UTI
+    // Montar prompt otimizado (reduzido)
+    const prompt = `# TAREFA: Atualizar Round Médico da UTI
 
 ## CONTEXTO
 Você é um assistente médico especializado em documentação de UTI do Hospital Geral de Senador Canedo. 
@@ -248,9 +248,9 @@ Comece com o cabeçalho atualizado e processe todos os leitos em ordem.`;
           content: prompt,
         },
       ],
-      model: 'llama-3.3-70b-versatile', // Modelo mais avançado do Groq
+      model: 'llama-3.1-70b-versatile', // Modelo com contexto de 128k tokens
       temperature: 0.3, // Baixa temperatura para maior precisão
-      max_tokens: 8000,
+      max_tokens: 4000,
     });
 
     const textoProcessado = completion.choices[0]?.message?.content || '';

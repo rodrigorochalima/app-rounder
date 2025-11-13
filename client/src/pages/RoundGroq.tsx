@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { APP_TITLE } from "@/const";
 import { useTheme } from "@/contexts/ThemeContext";
-import { processarRoundComGroq } from "@/services/groqRoundProcessor";
+import { processarRoundComGroqV2 as processarRoundComGroq } from "@/services/groqRoundProcessorV2";
 import { FileText, Download, Moon, Sun, History, Upload, Loader2, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
