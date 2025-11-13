@@ -8,13 +8,15 @@ import Home from "./pages/Home";
 import RoundGemini from "./pages/RoundGemini";
 import RoundGroq from "./pages/RoundGroq";
 import RoundGroqPaste from "./pages/RoundGroqPaste";
+import RoundSimple from "./pages/RoundSimple";
 
 function Router() {
   const base = import.meta.env.BASE_URL;
   return (
     <WouterRouter base={base}>
     <Switch>
-      <Route path={"/"} component={RoundGroqPaste} />
+      <Route path={"/"} component={RoundSimple} />
+      <Route path={"/paste"} component={RoundGroqPaste} />
       <Route path={"/upload"} component={RoundGroq} />
       <Route path={"/gemini"} component={RoundGemini} />
       <Route path={"/whatsapp"} component={Home} />
