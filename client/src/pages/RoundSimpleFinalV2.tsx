@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Upload, Loader2, Download, Trash2 } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Upload, Loader2, Download, Trash2, FileText, Clipboard } from 'lucide-react';
 
 const API_KEY_STORAGE_KEY = 'groq_api_key';
 
@@ -10,6 +10,9 @@ export default function RoundSimpleFinalV2() {
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  const docAnteriorRef = useRef<HTMLInputElement>(null);
+  const transcricaoRef = useRef<HTMLInputElement>(null);
 
   // Carregar API Key do localStorage ao montar o componente
   useEffect(() => {
@@ -25,6 +28,16 @@ export default function RoundSimpleFinalV2() {
       localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
     }
   }, [apiKey]);
+
+  // Debug: Log quando os arquivos mudarem
+  useEffect(() => {
+    console.log('Estado atualizado:', {
+      apiKey: apiKey.length,
+      docAnterior: docAnterior?.name,
+      transcricao: transcricao?.name,
+      podeProcessar: apiKey.length > 10 && docAnterior !== null && transcricao !== null
+    });
+  }, [apiKey, docAnterior, transcricao]);
 
   const limparCache = () => {
     // Limpar cache do service worker
@@ -57,6 +70,57 @@ export default function RoundSimpleFinalV2() {
 
     // Recarregar página com timestamp para forçar atualização
     window.location.href = window.location.pathname + '?v=' + Date.now();
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent, tipo: 'anterior' | 'transcricao') => {
+    e.preventDefault();
+    const items = e.clipboardData?.items;
+    
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      
+      // Verificar se é um arquivo
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) {
+          console.log('Arquivo colado:', file.name, file.type);
+          
+          if (tipo === 'anterior') {
+            setDocAnterior(file);
+          } else {
+            setTranscricao(file);
+          }
+          
+          return;
+        }
+      }
+    }
+    
+    alert('Não foi possível colar o arquivo. Tente usar o botão "Escolher Arquivo".');
+  };
+
+  const handleDrop = (e: React.DragEvent, tipo: 'anterior' | 'transcricao') => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      console.log('Arquivo arrastado:', file.name, file.type);
+      
+      if (tipo === 'anterior') {
+        setDocAnterior(file);
+      } else {
+        setTranscricao(file);
+      }
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
   };
 
   const processarRound = async () => {
@@ -119,7 +183,8 @@ export default function RoundSimpleFinalV2() {
             ✅ Aplica cores automaticamente (Vermelho/Amarelo/Verde)<br/>
             ✅ Incrementa contadores<br/>
             ✅ Processa ZIP do WhatsApp com transcrição automática<br/>
-            ✅ API Key salva automaticamente (só precisa informar uma vez)
+            ✅ API Key salva automaticamente (só precisa informar uma vez)<br/>
+            ✅ <strong>Suporte a Colar (Ctrl+V ou Cmd+V)</strong>
           </p>
         </div>
 
@@ -158,19 +223,34 @@ export default function RoundSimpleFinalV2() {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Documento do Round Anterior
             </label>
-            <div className="relative">
+            <div 
+              className="relative border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-indigo-500 transition-colors"
+              onDrop={(e) => handleDrop(e, 'anterior')}
+              onDragOver={handleDragOver}
+              onPaste={(e) => handlePaste(e, 'anterior')}
+              tabIndex={0}
+            >
               <input
+                ref={docAnteriorRef}
                 type="file"
                 accept=".docx"
-                onChange={(e) => setDocAnterior(e.files?.[0] || null)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  console.log('Arquivo selecionado (anterior):', file?.name);
+                  setDocAnterior(file);
+                }}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
               />
               {docAnterior && (
-                <div className="mt-2 flex items-center gap-2 text-sm text-green-600">
-                  <Upload size={16} />
+                <div className="mt-2 flex items-center gap-2 text-sm text-green-600 font-medium">
+                  <FileText size={16} />
                   {docAnterior.name}
                 </div>
               )}
+              <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                <Clipboard size={14} />
+                <span>Você também pode colar (Ctrl+V) ou arrastar o arquivo aqui</span>
+              </div>
             </div>
             <p className="text-sm text-gray-500 mt-2">Aceita: .docx</p>
           </div>
@@ -180,23 +260,46 @@ export default function RoundSimpleFinalV2() {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Transcrição ou WhatsApp ZIP
             </label>
-            <div className="relative">
+            <div 
+              className="relative border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-indigo-500 transition-colors"
+              onDrop={(e) => handleDrop(e, 'transcricao')}
+              onDragOver={handleDragOver}
+              onPaste={(e) => handlePaste(e, 'transcricao')}
+              tabIndex={0}
+            >
               <input
+                ref={transcricaoRef}
                 type="file"
                 accept=".docx,.txt,.zip,.mp3,.wav,.m4a,.ogg"
-                onChange={(e) => setTranscricao(e.files?.[0] || null)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  console.log('Arquivo selecionado (transcrição):', file?.name);
+                  setTranscricao(file);
+                }}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
               />
               {transcricao && (
-                <div className="mt-2 flex items-center gap-2 text-sm text-green-600">
-                  <Upload size={16} />
+                <div className="mt-2 flex items-center gap-2 text-sm text-green-600 font-medium">
+                  <FileText size={16} />
                   {transcricao.name}
                 </div>
               )}
+              <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                <Clipboard size={14} />
+                <span>Você também pode colar (Ctrl+V) ou arrastar o arquivo aqui</span>
+              </div>
             </div>
             <p className="text-sm text-gray-500 mt-2">
               Aceita: Documentos, ZIP do WhatsApp, áudios
             </p>
+          </div>
+
+          {/* Debug Info */}
+          <div className="mb-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-600">
+            <strong>Debug:</strong> API Key: {apiKey.length > 10 ? '✓' : '✗'} | 
+            Doc Anterior: {docAnterior ? '✓ ' + docAnterior.name : '✗'} | 
+            Transcrição: {transcricao ? '✓ ' + transcricao.name : '✗'} | 
+            Pode Processar: {podeProcessar ? '✓ SIM' : '✗ NÃO'}
           </div>
 
           {/* Botão de Processar */}
