@@ -1,7 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
-import { Upload, Loader2, Download, Trash2, FileText, Clipboard } from 'lucide-react';
+import { Upload, Loader2, Download, Trash2, FileText, Clipboard, CheckCircle2, Clock } from 'lucide-react';
+import { processarRound, gerarNomeArquivo } from '../lib/processador-round';
 
 const API_KEY_STORAGE_KEY = 'groq_api_key';
+const HISTORY_STORAGE_KEY = 'round_history';
+
+interface HistoryItem {
+  id: string;
+  filename: string;
+  date: string;
+  time: string;
+  url: string;
+}
+
+interface ProcessingStep {
+  id: number;
+  label: string;
+  status: 'pending' | 'processing' | 'completed';
+}
 
 export default function RoundSimpleFinalV2() {
   const [apiKey, setApiKey] = useState('');
@@ -10,37 +26,75 @@ export default function RoundSimpleFinalV2() {
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [downloadFilename, setDownloadFilename] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  
+  const [processingSteps, setProcessingSteps] = useState<ProcessingStep[]>([
+    { id: 1, label: '📤 Enviando arquivos', status: 'pending' },
+    { id: 2, label: '🤖 Processando com IA', status: 'pending' },
+    { id: 3, label: '📝 Gerando documento', status: 'pending' },
+    { id: 4, label: '✅ Finalizando', status: 'pending' },
+  ]);
   
   const docAnteriorRef = useRef<HTMLInputElement>(null);
   const transcricaoRef = useRef<HTMLInputElement>(null);
 
-  // Carregar API Key do localStorage ao montar o componente
+  // Carregar API Key e histórico do localStorage
   useEffect(() => {
     const savedApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
     if (savedApiKey) {
       setApiKey(savedApiKey);
     }
+    
+    const savedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (savedHistory) {
+      try {
+        setHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error('Erro ao carregar histórico:', e);
+      }
+    }
   }, []);
 
-  // Salvar API Key no localStorage quando mudar
+  // Salvar API Key no localStorage
   useEffect(() => {
     if (apiKey && apiKey.length > 10) {
       localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
     }
   }, [apiKey]);
 
-  // Debug: Log quando os arquivos mudarem
-  useEffect(() => {
-    console.log('Estado atualizado:', {
-      apiKey: apiKey.length,
-      docAnterior: docAnterior?.name,
-      transcricao: transcricao?.name,
-      podeProcessar: apiKey.length > 10 && docAnterior !== null && transcricao !== null
-    });
-  }, [apiKey, docAnterior, transcricao]);
+  const updateStep = (stepId: number, status: 'processing' | 'completed') => {
+    setProcessingSteps(prev => prev.map(step => 
+      step.id === stepId ? { ...step, status } : step
+    ));
+  };
+
+  const resetSteps = () => {
+    setProcessingSteps([
+      { id: 1, label: '📤 Enviando arquivos', status: 'pending' },
+      { id: 2, label: '🤖 Processando com IA', status: 'pending' },
+      { id: 3, label: '📝 Gerando documento', status: 'pending' },
+      { id: 4, label: '✅ Finalizando', status: 'pending' },
+    ]);
+  };
+
+  const addToHistory = (filename: string, url: string) => {
+    const now = new Date();
+    const newItem: HistoryItem = {
+      id: Date.now().toString(),
+      filename,
+      date: now.toLocaleDateString('pt-BR'),
+      time: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      url
+    };
+    
+    const newHistory = [newItem, ...history].slice(0, 5); // Manter apenas os 5 mais recentes
+    setHistory(newHistory);
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(newHistory));
+  };
 
   const limparCache = () => {
-    // Limpar cache do service worker
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then((registrations) => {
         registrations.forEach((registration) => {
@@ -49,7 +103,6 @@ export default function RoundSimpleFinalV2() {
       });
     }
 
-    // Limpar cache storage
     if ('caches' in window) {
       caches.keys().then((names) => {
         names.forEach((name) => {
@@ -58,17 +111,17 @@ export default function RoundSimpleFinalV2() {
       });
     }
 
-    // Limpar localStorage (exceto API Key)
     const savedApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+    const savedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
     localStorage.clear();
     if (savedApiKey) {
       localStorage.setItem(API_KEY_STORAGE_KEY, savedApiKey);
     }
+    if (savedHistory) {
+      localStorage.setItem(HISTORY_STORAGE_KEY, savedHistory);
+    }
 
-    // Limpar sessionStorage
     sessionStorage.clear();
-
-    // Recarregar página com timestamp para forçar atualização
     window.location.href = window.location.pathname + '?v=' + Date.now();
   };
 
@@ -81,7 +134,6 @@ export default function RoundSimpleFinalV2() {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       
-      // Verificar se é um arquivo
       if (item.kind === 'file') {
         const file = item.getAsFile();
         if (file) {
@@ -123,7 +175,7 @@ export default function RoundSimpleFinalV2() {
     e.stopPropagation();
   };
 
-  const processarRound = async () => {
+  const processarRoundHandler = async () => {
     if (!apiKey || !docAnterior || !transcricao) {
       setError('Por favor, preencha todos os campos');
       return;
@@ -132,21 +184,64 @@ export default function RoundSimpleFinalV2() {
     setProcessing(true);
     setError(null);
     setResult(null);
+    setDownloadUrl(null);
+    setDownloadFilename(null);
+    resetSteps();
 
     try {
-      // Aqui será implementada a lógica de processamento
-      // Por agora, apenas simula o processamento
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Callback de progresso real
+      const onProgress = (percent: number, message: string) => {
+        console.log(`Progresso: ${percent}% - ${message}`);
+        
+        // Atualizar steps baseado na porcentagem
+        if (percent >= 0 && percent < 25) {
+          updateStep(1, 'processing');
+        } else if (percent >= 25 && percent < 50) {
+          updateStep(1, 'completed');
+          updateStep(2, 'processing');
+        } else if (percent >= 50 && percent < 75) {
+          updateStep(2, 'completed');
+          updateStep(3, 'processing');
+        } else if (percent >= 75 && percent < 100) {
+          updateStep(3, 'completed');
+          updateStep(4, 'processing');
+        } else if (percent === 100) {
+          updateStep(4, 'completed');
+        }
+      };
       
-      setResult('Documento processado com sucesso!');
+      // Processar documento com IA
+      const blob = await processarRound(apiKey, docAnterior, transcricao, onProgress);
+      
+      // Criar URL para download
+      const url = URL.createObjectURL(blob);
+      const filename = gerarNomeArquivo();
+      
+      setDownloadUrl(url);
+      setDownloadFilename(filename);
+      setResult('Documento gerado com sucesso!');
+      
+      // Adicionar ao histórico
+      addToHistory(filename, url);
+      
     } catch (err) {
+      console.error('Erro ao processar:', err);
       setError(err instanceof Error ? err.message : 'Erro ao processar documento');
+      resetSteps();
     } finally {
       setProcessing(false);
     }
   };
 
-  // Verificar se todos os campos estão preenchidos
+  const handleDownload = (url: string, filename: string) => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const podeProcessar = apiKey.length > 10 && docAnterior !== null && transcricao !== null;
 
   return (
@@ -203,6 +298,7 @@ export default function RoundSimpleFinalV2() {
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="Cole sua API Key aqui (será salva automaticamente)"
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              disabled={processing}
             />
             <p className="text-sm text-gray-500 mt-2">
               Obtenha em:{' '}
@@ -240,6 +336,7 @@ export default function RoundSimpleFinalV2() {
                   setDocAnterior(file);
                 }}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                disabled={processing}
               />
               {docAnterior && (
                 <div className="mt-2 flex items-center gap-2 text-sm text-green-600 font-medium">
@@ -277,6 +374,7 @@ export default function RoundSimpleFinalV2() {
                   setTranscricao(file);
                 }}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                disabled={processing}
               />
               {transcricao && (
                 <div className="mt-2 flex items-center gap-2 text-sm text-green-600 font-medium">
@@ -294,17 +392,38 @@ export default function RoundSimpleFinalV2() {
             </p>
           </div>
 
-          {/* Debug Info */}
-          <div className="mb-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-600">
-            <strong>Debug:</strong> API Key: {apiKey.length > 10 ? '✓' : '✗'} | 
-            Doc Anterior: {docAnterior ? '✓ ' + docAnterior.name : '✗'} | 
-            Transcrição: {transcricao ? '✓ ' + transcricao.name : '✗'} | 
-            Pode Processar: {podeProcessar ? '✓ SIM' : '✗ NÃO'}
-          </div>
+          {/* Barra de Progresso */}
+          {processing && (
+            <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Processando...</h3>
+              <div className="space-y-3">
+                {processingSteps.map((step) => (
+                  <div key={step.id} className="flex items-center gap-3">
+                    {step.status === 'completed' && (
+                      <CheckCircle2 className="text-green-500 flex-shrink-0" size={20} />
+                    )}
+                    {step.status === 'processing' && (
+                      <Loader2 className="text-blue-500 animate-spin flex-shrink-0" size={20} />
+                    )}
+                    {step.status === 'pending' && (
+                      <Clock className="text-gray-300 flex-shrink-0" size={20} />
+                    )}
+                    <span className={`text-sm ${
+                      step.status === 'completed' ? 'text-green-700 font-medium' :
+                      step.status === 'processing' ? 'text-blue-700 font-medium' :
+                      'text-gray-400'
+                    }`}>
+                      {step.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Botão de Processar */}
           <button
-            onClick={processarRound}
+            onClick={processarRoundHandler}
             disabled={processing || !podeProcessar}
             className={`w-full py-4 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
               podeProcessar && !processing
@@ -332,9 +451,18 @@ export default function RoundSimpleFinalV2() {
             </div>
           )}
 
-          {result && (
-            <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg text-green-700">
-              ✅ {result}
+          {result && downloadUrl && downloadFilename && (
+            <div className="mt-4 space-y-3">
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-green-700">
+                ✅ {result}
+              </div>
+              <button
+                onClick={() => handleDownload(downloadUrl, downloadFilename)}
+                className="w-full py-4 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <Download size={24} />
+                Baixar {downloadFilename}
+              </button>
             </div>
           )}
         </div>
@@ -342,9 +470,32 @@ export default function RoundSimpleFinalV2() {
         {/* Histórico */}
         <div className="bg-white rounded-lg shadow-lg p-6">
           <h2 className="text-xl font-bold text-gray-800 mb-4">📚 Histórico</h2>
-          <p className="text-gray-600">
-            Os últimos 5 documentos gerados aparecerão aqui
-          </p>
+          {history.length === 0 ? (
+            <p className="text-gray-600">
+              Os últimos 5 documentos gerados aparecerão aqui
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {history.map((item) => (
+                <div key={item.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="flex items-center gap-3">
+                    <FileText className="text-indigo-600" size={24} />
+                    <div>
+                      <p className="font-medium text-gray-800">{item.filename}</p>
+                      <p className="text-sm text-gray-500">{item.date} às {item.time}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleDownload(item.url, item.filename)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                  >
+                    <Download size={16} />
+                    Baixar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
