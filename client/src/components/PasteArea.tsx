@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Card } from "@/components/ui/card";
-import { X, FileText, Image as ImageIcon, Music, File } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { X, FileText, Image as ImageIcon, Music, File, Upload } from "lucide-react";
 
 interface PasteAreaProps {
   label: string;
   onContentPaste: (content: PastedContent) => void;
-  accept?: string;
   placeholder?: string;
 }
 
@@ -17,12 +17,12 @@ export interface PastedContent {
 
 export default function PasteArea({ label, onContentPaste, placeholder }: PasteAreaProps) {
   const [content, setContent] = useState<PastedContent | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Detectar paste
-  const handlePaste = async (e: React.ClipboardEvent) => {
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     e.preventDefault();
     const items = e.clipboardData.items;
 
@@ -91,43 +91,6 @@ export default function PasteArea({ label, onContentPaste, placeholder }: PasteA
     }
   };
 
-  // Drag and drop
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      const file = files[0];
-      let type: 'text' | 'image' | 'audio' | 'file' = 'file';
-
-      if (file.type.startsWith('image/')) type = 'image';
-      else if (file.type.startsWith('audio/')) type = 'audio';
-      else if (file.type.includes('text') || file.name.endsWith('.txt')) type = 'text';
-
-      const preview = type === 'image' ? URL.createObjectURL(file) : 
-                      `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
-
-      const pastedContent: PastedContent = {
-        type,
-        data: file,
-        preview,
-      };
-
-      setContent(pastedContent);
-      onContentPaste(pastedContent);
-    }
-  };
-
   // Upload via botão
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -160,6 +123,11 @@ export default function PasteArea({ label, onContentPaste, placeholder }: PasteA
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // Focar no textarea
+  const handleCardClick = () => {
+    textareaRef.current?.focus();
+  };
+
   // Ícone baseado no tipo
   const getIcon = () => {
     if (!content) return <FileText className="h-8 w-8 text-muted-foreground" />;
@@ -177,42 +145,52 @@ export default function PasteArea({ label, onContentPaste, placeholder }: PasteA
       
       {!content ? (
         <Card
-          className={`relative border-2 border-dashed transition-colors ${
-            isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
+          className={`border-2 border-dashed transition-colors cursor-text ${
+            isFocused ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
           }`}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
+          onClick={handleCardClick}
         >
-          <div className="p-6 text-center space-y-3">
+          <div className="p-6 text-center space-y-4">
             {getIcon()}
             
-            <div className="space-y-1">
+            <div className="space-y-2">
               <p className="text-sm font-medium">
-                Cole aqui (long press → paste)
+                Toque aqui e segure para colar
               </p>
               <p className="text-xs text-muted-foreground">
                 {placeholder || 'Texto, imagem, áudio ou arquivo'}
               </p>
             </div>
 
-            {/* Textarea invisível para capturar paste */}
+            {/* Textarea VISÍVEL para iOS */}
             <textarea
               ref={textareaRef}
               onPaste={handlePaste}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              placeholder="Cole aqui..."
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
+              className="w-full h-24 p-3 text-sm border rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="Toque e segure para colar..."
+              style={{
+                WebkitUserSelect: 'text',
+                WebkitTouchCallout: 'default',
+              }}
             />
 
-            {/* Botão de upload alternativo */}
+            {/* Botão de upload */}
             <div className="pt-2">
-              <button
+              <Button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="text-xs text-primary hover:underline"
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fileInputRef.current?.click();
+                }}
+                className="w-full"
               >
-                ou selecione um arquivo
-              </button>
+                <Upload className="mr-2 h-4 w-4" />
+                Ou selecione um arquivo
+              </Button>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -224,7 +202,7 @@ export default function PasteArea({ label, onContentPaste, placeholder }: PasteA
           </div>
         </Card>
       ) : (
-        <Card className="relative border-green-500/50 bg-green-500/5">
+        <Card className="border-green-500/50 bg-green-500/5">
           <div className="p-4 space-y-2">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -241,13 +219,14 @@ export default function PasteArea({ label, onContentPaste, placeholder }: PasteA
                   </p>
                 </div>
               </div>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 onClick={handleClear}
-                className="text-muted-foreground hover:text-foreground"
               >
                 <X className="h-4 w-4" />
-              </button>
+              </Button>
             </div>
 
             {/* Preview de imagem */}
