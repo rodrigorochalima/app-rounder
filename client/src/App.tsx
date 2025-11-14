@@ -9,13 +9,15 @@ import RoundGemini from "./pages/RoundGemini";
 import RoundGroq from "./pages/RoundGroq";
 import RoundGroqPaste from "./pages/RoundGroqPaste";
 import RoundOpenAI from "./pages/RoundOpenAI";
+import RoundCerebrasGemini from "./pages/RoundCerebrasGemini";
 
 function Router() {
   const base = import.meta.env.BASE_URL;
   return (
     <WouterRouter base={base}>
     <Switch>
-      <Route path={"/"} component={RoundOpenAI} />
+      <Route path={"/"} component={RoundCerebrasGemini} />
+      <Route path={"/openai"} component={RoundOpenAI} />
       <Route path={"/paste"} component={RoundGroqPaste} />
       <Route path={"/upload"} component={RoundGroq} />
       <Route path={"/gemini"} component={RoundGemini} />
