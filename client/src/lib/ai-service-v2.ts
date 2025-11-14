@@ -3,6 +3,8 @@
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { validarTerminologiaMedica, formatarRelatorioCorrecoes } from './validador-medico';
+import { buscarRegrasAtivas } from './supabase';
 
 // ============================================
 // CEREBRAS API (AGENTE 1 - Processamento)
@@ -191,13 +193,21 @@ export class SistemaAprendizado {
     localStorage.removeItem(this.STORAGE_KEY);
   }
 
-  gerarPromptComRegras(): string {
-    const regras = this.obterRegras();
-    if (regras.length === 0) return '';
+  async gerarPromptComRegras(): Promise<string> {
+    // Buscar regras do Supabase
+    const regrasSupabase = await buscarRegrasAtivas();
+    
+    // Buscar regras do localStorage (legado)
+    const regrasLocal = this.obterRegras();
+    
+    // Combinar todas as regras
+    const todasRegras = [...regrasSupabase, ...regrasLocal];
+    
+    if (todasRegras.length === 0) return '';
 
     let prompt = '\n\n## REGRAS APRENDIDAS (SEMPRE SEGUIR):\n\n';
     
-    regras.forEach((regra, index) => {
+    todasRegras.forEach((regra, index) => {
       prompt += `${index + 1}. [${regra.tipo.toUpperCase()}] ${regra.descricao}\n`;
       if (regra.exemplo) {
         prompt += `   Exemplo: ${regra.exemplo}\n`;
@@ -217,12 +227,14 @@ export class ProcessadorRound {
   private gemini: GeminiAgent;
   private whisper: GroqWhisper;
   private aprendizado: SistemaAprendizado;
+  private groqKey: string;
 
   constructor(cerebrasKey: string, geminiKey: string, groqKey: string) {
     this.cerebras = new CerebrasAgent(cerebrasKey);
     this.gemini = new GeminiAgent(geminiKey);
     this.whisper = new GroqWhisper(groqKey);
     this.aprendizado = new SistemaAprendizado();
+    this.groqKey = groqKey;
   }
 
   async processar(
@@ -232,7 +244,7 @@ export class ProcessadorRound {
   ): Promise<string> {
     try {
       // ETAPA 1: Processamento com Cerebras
-      const regrasAprendidas = this.aprendizado.gerarPromptComRegras();
+      const regrasAprendidas = await this.aprendizado.gerarPromptComRegras();
       
       const promptProcessamento = `
 # TAREFA: Gerar Round Médico de Hoje
@@ -271,11 +283,22 @@ GERE O ROUND DE HOJE:
       const documentoBruto = await this.cerebras.processar(promptProcessamento, onProgress);
 
       // ETAPA 2: Validação com Gemini
-      const documentoFinal = await this.gemini.validar(documentoBruto, onProgress);
+      const documentoValidado = await this.gemini.validar(documentoBruto, onProgress);
+
+      // ETAPA 3: Validação de Terminologia Médica com Groq
+      if (onProgress) onProgress(92, '🏥 AGENTE 3: Validando terminologia médica...');
+      
+      const resultadoValidacao = await validarTerminologiaMedica(documentoValidado, this.groqKey);
+      
+      if (onProgress) {
+        const relatorio = formatarRelatorioCorrecoes(resultadoValidacao.correcoes);
+        console.log('📋 Relatório de correções:', relatorio);
+        onProgress(98, `✅ AGENTE 3: ${resultadoValidacao.correcoes.length} correções aplicadas!`);
+      }
 
       if (onProgress) onProgress(100, '✅ Round gerado com sucesso!');
 
-      return documentoFinal;
+      return resultadoValidacao.documentoCorrigido;
     } catch (error: any) {
       throw new Error(`Erro no processamento: ${error.message}`);
     }
