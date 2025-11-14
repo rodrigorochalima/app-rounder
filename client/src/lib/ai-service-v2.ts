@@ -22,6 +22,9 @@ export class CerebrasAgent {
     try {
       if (onProgress) onProgress(30, '🤖 AGENTE 1: Processando com Cerebras...');
 
+      console.log('[CEREBRAS] Iniciando requisição...');
+      console.log('[CEREBRAS] API Key:', this.apiKey.substring(0, 10) + '...');
+
       const response = await fetch(`${this.baseURL}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -46,8 +49,10 @@ export class CerebrasAgent {
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Cerebras Error: ${JSON.stringify(error)}`);
+        const errorText = await response.text();
+        console.error('[CEREBRAS] Erro HTTP:', response.status, response.statusText);
+        console.error('[CEREBRAS] Resposta:', errorText);
+        throw new Error(`Cerebras Error [${response.status}]: ${errorText}`);
       }
 
       const data = await response.json();
@@ -57,6 +62,7 @@ export class CerebrasAgent {
 
       return resultado;
     } catch (error: any) {
+      console.error('[CEREBRAS] Erro completo:', error);
       throw new Error(`Erro no Cerebras: ${error.message}`);
     }
   }
@@ -77,7 +83,14 @@ export class GeminiAgent {
     try {
       if (onProgress) onProgress(70, '🔍 AGENTE 2: Validando com Gemini...');
 
-      const model = this.genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+      console.log('[GEMINI] Iniciando validação...');
+      const model = this.genAI.getGenerativeModel({ 
+        model: 'gemini-2.0-flash-exp',
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 8000,
+        }
+      });
 
       const prompt = `
 Você é um validador de documentos médicos. Analise o documento abaixo e:
@@ -95,13 +108,21 @@ Retorne APENAS o documento corrigido, sem explicações adicionais.
 `;
 
       const result = await model.generateContent(prompt);
+      console.log('[GEMINI] Resposta recebida');
+      
       const response = await result.response;
+      console.log('[GEMINI] Status:', response);
+      
       const documentoFinal = response.text();
+      console.log('[GEMINI] Documento validado com sucesso');
 
       if (onProgress) onProgress(90, '✅ AGENTE 2: Validação concluída!');
 
       return documentoFinal;
     } catch (error: any) {
+      console.error('[GEMINI] Erro completo:', error);
+      console.error('[GEMINI] Stack:', error.stack);
+      console.error('[GEMINI] Message:', error.message);
       throw new Error(`Erro no Gemini: ${error.message}`);
     }
   }
