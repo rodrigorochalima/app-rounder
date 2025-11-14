@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ProcessadorRound, RegraAprendida } from '../lib/ai-service-v2';
 import { DocxGenerator } from '../lib/docx-generator';
+import { buscarRegrasAtivas, salvarFeedbackAudio, uploadAudio, buscarHistoricoRecente, type HistoricoRound } from '../lib/supabase';
 import mammoth from 'mammoth';
+import { Mic, MicOff, Upload, Download, History, BookOpen, Trash2, X } from 'lucide-react';
 
 export default function RoundCerebrasGemini() {
   // Estados de configuração
@@ -27,8 +29,29 @@ export default function RoundCerebrasGemini() {
   const [regrasAprendidas, setRegrasAprendidas] = useState<RegraAprendida[]>([]);
   const [mostrarRegras, setMostrarRegras] = useState(false);
 
-  // Carregar API Keys do localStorage
+  // Estados de histórico
+  const [historico, setHistorico] = useState<HistoricoRound[]>([]);
+  const [mostrarHistorico, setMostrarHistorico] = useState(false);
+
+  // Estados de gravação de áudio
+  const [gravando, setGravando] = useState(false);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  // Carregar API Keys do localStorage (LIMPAR PRIMEIRO)
   useEffect(() => {
+    // Limpar API keys antigas que podem estar expiradas
+    const ultimaLimpeza = localStorage.getItem('ultima_limpeza_keys');
+    const agora = Date.now();
+    const umDia = 24 * 60 * 60 * 1000;
+
+    if (!ultimaLimpeza || (agora - parseInt(ultimaLimpeza)) > umDia) {
+      // Limpar apenas se passou mais de 1 dia
+      localStorage.removeItem('gemini_api_key');
+      localStorage.setItem('ultima_limpeza_keys', agora.toString());
+    }
+
     const savedCerebras = localStorage.getItem('cerebras_api_key');
     const savedGemini = localStorage.getItem('gemini_api_key');
     const savedGroq = localStorage.getItem('groq_api_key');
@@ -36,22 +59,36 @@ export default function RoundCerebrasGemini() {
     if (savedCerebras) setCerebrasKey(savedCerebras);
     if (savedGemini) setGeminiKey(savedGemini);
     if (savedGroq) setGroqKey(savedGroq);
+
+    // Carregar regras do Supabase
+    carregarRegras();
+    carregarHistorico();
   }, []);
+
+  const carregarRegras = async () => {
+    const regras = await buscarRegrasAtivas();
+    setRegrasAprendidas(regras as any[]);
+  };
+
+  const carregarHistorico = async () => {
+    const hist = await buscarHistoricoRecente(30);
+    setHistorico(hist);
+  };
 
   // Salvar API Keys no localStorage
   const salvarCerebrasKey = (key: string) => {
     setCerebrasKey(key);
-    localStorage.setItem('cerebras_api_key', key);
+    if (key) localStorage.setItem('cerebras_api_key', key);
   };
 
   const salvarGeminiKey = (key: string) => {
     setGeminiKey(key);
-    localStorage.setItem('gemini_api_key', key);
+    if (key) localStorage.setItem('gemini_api_key', key);
   };
 
   const salvarGroqKey = (key: string) => {
     setGroqKey(key);
-    localStorage.setItem('groq_api_key', key);
+    if (key) localStorage.setItem('groq_api_key', key);
   };
 
   // Verificar se pode processar
@@ -111,10 +148,13 @@ export default function RoundCerebrasGemini() {
       setProgresso(100);
       setMensagemProgresso('✅ Round gerado com sucesso!');
 
-      // Atualizar regras aprendidas
-      setRegrasAprendidas(processador.obterRegrasAprendidas());
+      // Baixar automaticamente
+      setTimeout(() => baixarDocx(), 500);
+
+      // Recarregar histórico
+      carregarHistorico();
     } catch (error: any) {
-      setErro(error.message);
+      setErro(`Erro no processamento: ${error.message}`);
       setProgresso(0);
     } finally {
       setProcessando(false);
@@ -146,265 +186,732 @@ export default function RoundCerebrasGemini() {
     }
   };
 
+  // Gravação de áudio
+  const iniciarGravacao = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setAudioBlob(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setGravando(true);
+    } catch (error: any) {
+      setErro(`Erro ao iniciar gravação: ${error.message}`);
+    }
+  };
+
+  const pararGravacao = () => {
+    if (mediaRecorderRef.current && gravando) {
+      mediaRecorderRef.current.stop();
+      setGravando(false);
+    }
+  };
+
+  const enviarFeedback = async () => {
+    if (!audioBlob) return;
+
+    try {
+      setMensagemProgresso('📤 Enviando feedback...');
+      const audioUrl = await uploadAudio(audioBlob);
+      
+      if (audioUrl) {
+        await salvarFeedbackAudio(audioUrl);
+        setMensagemProgresso('✅ Feedback enviado com sucesso!');
+        setAudioBlob(null);
+        
+        // Recarregar regras após alguns segundos
+        setTimeout(() => carregarRegras(), 3000);
+      }
+    } catch (error: any) {
+      setErro(`Erro ao enviar feedback: ${error.message}`);
+    }
+  };
+
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      {/* Cabeçalho */}
-      <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-        <h1 style={{ fontSize: '32px', marginBottom: '8px' }}>Gerar Round de Hoje</h1>
-        <p style={{ color: '#666', fontSize: '14px' }}>
-          Sistema com dupla checagem de IA (Cerebras + Gemini) e aprendizado contínuo
-        </p>
-      </div>
-
-      {/* Configuração de API Keys */}
-      <div style={{ background: '#f9f9f9', padding: '24px', borderRadius: '12px', marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          🔑 Configuração
-        </h2>
-
-        {/* Cerebras API Key */}
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
-            API Key do Cerebras {cerebrasKey && '✓ Salva'}
-          </label>
-          <input
-            type="password"
-            value={cerebrasKey}
-            onChange={(e) => salvarCerebrasKey(e.target.value)}
-            placeholder="Cole sua API Key do Cerebras (csk-...)"
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #A8D8EA 0%, #5B9BD5 100%)',
+      padding: '20px',
+      fontFamily: 'system-ui, -apple-system, sans-serif'
+    }}>
+      <div style={{
+        maxWidth: '900px',
+        margin: '0 auto'
+      }}>
+        {/* Header */}
+        <div style={{
+          textAlign: 'center',
+          marginBottom: '40px'
+        }}>
+          <img 
+            src="/logo.png" 
+            alt="Rounder" 
             style={{
-              width: '100%',
-              padding: '12px',
-              border: '2px dashed #ccc',
-              borderRadius: '8px',
-              fontSize: '14px',
-              background: cerebrasKey ? '#e8f5e9' : 'white'
+              width: '120px',
+              height: '120px',
+              borderRadius: '24px',
+              marginBottom: '20px',
+              boxShadow: '0 8px 16px rgba(0,0,0,0.2)'
             }}
           />
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-            Obtenha em: <a href="https://cloud.cerebras.ai" target="_blank" rel="noopener noreferrer" style={{ color: '#4285f4' }}>cloud.cerebras.ai</a> (gratuito, ilimitado)
+          <h1 style={{
+            fontSize: '32px',
+            fontWeight: 'bold',
+            color: '#2C3E50',
+            margin: '0 0 10px 0'
+          }}>
+            App Rounder
+          </h1>
+          <p style={{
+            fontSize: '16px',
+            color: '#2C3E50',
+            opacity: 0.8
+          }}>
+            Gerador Inteligente de Rounds Médicos
           </p>
         </div>
 
-        {/* Gemini API Key */}
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
-            API Key do Google Gemini {geminiKey && '✓ Salva'}
-          </label>
-          <input
-            type="password"
-            value={geminiKey}
-            onChange={(e) => salvarGeminiKey(e.target.value)}
-            placeholder="Cole sua API Key do Gemini (AIzaSy...)"
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '2px dashed #ccc',
-              borderRadius: '8px',
-              fontSize: '14px',
-              background: geminiKey ? '#e8f5e9' : 'white'
-            }}
-          />
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-            Obtenha em: <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" style={{ color: '#4285f4' }}>aistudio.google.com/app/apikey</a> (gratuito)
-          </p>
-        </div>
+        {/* Card Principal */}
+        <div style={{
+          background: 'white',
+          borderRadius: '16px',
+          padding: '32px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.1)',
+          marginBottom: '20px'
+        }}>
+          {/* API Keys */}
+          <div style={{ marginBottom: '32px' }}>
+            <h2 style={{
+              fontSize: '20px',
+              fontWeight: '600',
+              color: '#2C3E50',
+              marginBottom: '20px'
+            }}>
+              🔑 API Keys (100% Gratuitas)
+            </h2>
 
-        {/* Groq API Key */}
-        <div>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
-            API Key do Groq {groqKey && '✓ Salva'}
-          </label>
-          <input
-            type="password"
-            value={groqKey}
-            onChange={(e) => salvarGroqKey(e.target.value)}
-            placeholder="Cole sua API Key do Groq (gsk_...)"
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '2px dashed #ccc',
-              borderRadius: '8px',
-              fontSize: '14px',
-              background: groqKey ? '#e8f5e9' : 'white'
-            }}
-          />
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-            Obtenha em: <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" style={{ color: '#4285f4' }}>console.groq.com/keys</a> (gratuito)
-          </p>
-        </div>
-      </div>
+            {/* Cerebras */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: '#2C3E50',
+                marginBottom: '8px'
+              }}>
+                Cerebras API Key ✅
+              </label>
+              <input
+                type="password"
+                value={cerebrasKey}
+                onChange={(e) => salvarCerebrasKey(e.target.value)}
+                placeholder="Cole sua Cerebras API Key aqui..."
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  fontSize: '14px',
+                  border: '2px solid #E0E0E0',
+                  borderRadius: '8px',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                  fontFamily: 'monospace'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#5B9BD5'}
+                onBlur={(e) => e.target.style.borderColor = '#E0E0E0'}
+              />
+              <a 
+                href="https://cerebras.ai" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{
+                  fontSize: '12px',
+                  color: '#5B9BD5',
+                  textDecoration: 'none',
+                  marginTop: '4px',
+                  display: 'inline-block'
+                }}
+              >
+                Obter em: cerebras.ai (gratuito)
+              </a>
+            </div>
 
-      {/* Documentos */}
-      <div style={{ background: 'white', padding: '24px', borderRadius: '12px', border: '1px solid #e0e0e0', marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          📄 Documentos
-        </h2>
+            {/* Gemini */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: '#2C3E50',
+                marginBottom: '8px'
+              }}>
+                Google Gemini API Key ✅
+              </label>
+              <input
+                type="password"
+                value={geminiKey}
+                onChange={(e) => salvarGeminiKey(e.target.value)}
+                placeholder="Cole sua Gemini API Key aqui..."
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  fontSize: '14px',
+                  border: '2px solid #E0E0E0',
+                  borderRadius: '8px',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                  fontFamily: 'monospace'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#5B9BD5'}
+                onBlur={(e) => e.target.style.borderColor = '#E0E0E0'}
+              />
+              <a 
+                href="https://aistudio.google.com/apikey" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{
+                  fontSize: '12px',
+                  color: '#5B9BD5',
+                  textDecoration: 'none',
+                  marginTop: '4px',
+                  display: 'inline-block'
+                }}
+              >
+                Obter em: aistudio.google.com/apikey (gratuito)
+              </a>
+            </div>
 
-        {/* Documento Anterior */}
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
-            Documento do Round Anterior
-          </label>
-          <input
-            type="file"
-            accept=".docx"
-            onChange={(e) => setDocAnterior(e.target.files?.[0] || null)}
-            style={{ width: '100%' }}
-          />
-          {docAnterior && (
-            <p style={{ fontSize: '12px', color: '#4caf50', marginTop: '4px' }}>
-              ✓ {docAnterior.name}
-            </p>
-          )}
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-            Aceita: .docx
-          </p>
-        </div>
-
-        {/* Transcrição ou Áudio */}
-        <div>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
-            Transcrição ou Áudio do Dia
-          </label>
-          <input
-            type="file"
-            accept=".docx,.txt,.mp3,.wav,.m4a,.webm"
-            onChange={(e) => setTranscricao(e.target.files?.[0] || null)}
-            style={{ width: '100%' }}
-          />
-          {transcricao && (
-            <p style={{ fontSize: '12px', color: '#4caf50', marginTop: '4px' }}>
-              ✓ {transcricao.name}
-            </p>
-          )}
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-            Aceita: Documentos (.docx, .txt) ou Áudios (.mp3, .wav, .m4a, .webm)
-          </p>
-        </div>
-      </div>
-
-      {/* Botão de Processar */}
-      <button
-        onClick={processarRound}
-        disabled={!podeProcessar || processando}
-        style={{
-          width: '100%',
-          padding: '16px',
-          fontSize: '18px',
-          fontWeight: '600',
-          color: 'white',
-          background: podeProcessar && !processando ? '#4285f4' : '#ccc',
-          border: 'none',
-          borderRadius: '12px',
-          cursor: podeProcessar && !processando ? 'pointer' : 'not-allowed',
-          marginBottom: '24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '8px'
-        }}
-      >
-        📥 Gerar Round de Hoje
-      </button>
-
-      {/* Barra de Progresso */}
-      {processando && (
-        <div style={{ marginBottom: '24px' }}>
-          <div style={{ background: '#f0f0f0', borderRadius: '8px', overflow: 'hidden', marginBottom: '8px' }}>
-            <div
-              style={{
-                width: `${progresso}%`,
-                height: '24px',
-                background: 'linear-gradient(90deg, #4285f4, #34a853)',
-                transition: 'width 0.3s ease'
-              }}
-            />
+            {/* Groq */}
+            <div style={{ marginBottom: '0' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: '#2C3E50',
+                marginBottom: '8px'
+              }}>
+                Groq API Key ✅
+              </label>
+              <input
+                type="password"
+                value={groqKey}
+                onChange={(e) => salvarGroqKey(e.target.value)}
+                placeholder="Cole sua Groq API Key aqui..."
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  fontSize: '14px',
+                  border: '2px solid #E0E0E0',
+                  borderRadius: '8px',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                  fontFamily: 'monospace'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#5B9BD5'}
+                onBlur={(e) => e.target.style.borderColor = '#E0E0E0'}
+              />
+              <a 
+                href="https://console.groq.com/keys" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{
+                  fontSize: '12px',
+                  color: '#5B9BD5',
+                  textDecoration: 'none',
+                  marginTop: '4px',
+                  display: 'inline-block'
+                }}
+              >
+                Obter em: console.groq.com/keys (gratuito)
+              </a>
+            </div>
           </div>
-          <p style={{ textAlign: 'center', fontSize: '14px', color: '#666' }}>
-            {mensagemProgresso}
-          </p>
-        </div>
-      )}
 
-      {/* Erro */}
-      {erro && (
-        <div style={{ background: '#ffebee', border: '1px solid #ef5350', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
-          <p style={{ color: '#c62828', margin: 0, fontSize: '14px' }}>
-            ⚠️ {erro}
-          </p>
-        </div>
-      )}
+          <div style={{
+            height: '1px',
+            background: '#E0E0E0',
+            margin: '32px 0'
+          }} />
 
-      {/* Sucesso + Download */}
-      {sucesso && documentoGerado && (
-        <div style={{ background: '#e8f5e9', border: '1px solid #4caf50', borderRadius: '8px', padding: '16px', marginBottom: '24px' }}>
-          <p style={{ color: '#2e7d32', marginBottom: '12px', fontSize: '16px', fontWeight: '600' }}>
-            ✅ Documento processado com sucesso!
-          </p>
+          {/* Upload de Documentos */}
+          <div style={{ marginBottom: '32px' }}>
+            <h2 style={{
+              fontSize: '20px',
+              fontWeight: '600',
+              color: '#2C3E50',
+              marginBottom: '20px'
+            }}>
+              📄 Documentos
+            </h2>
+
+            {/* Documento Anterior */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: '#2C3E50',
+                marginBottom: '8px'
+              }}>
+                Documento do Round Anterior
+              </label>
+              <div style={{
+                border: '2px dashed #5B9BD5',
+                borderRadius: '8px',
+                padding: '20px',
+                textAlign: 'center',
+                background: '#F8FCFF',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.background = '#E8F4FF';
+              }}
+              onDragLeave={(e) => {
+                e.currentTarget.style.background = '#F8FCFF';
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.background = '#F8FCFF';
+                const file = e.dataTransfer.files[0];
+                if (file && file.name.endsWith('.docx')) {
+                  setDocAnterior(file);
+                }
+              }}
+              onClick={() => document.getElementById('docAnterior')?.click()}
+              >
+                <Upload size={32} color="#5B9BD5" style={{ marginBottom: '8px' }} />
+                <p style={{ margin: '0 0 4px 0', color: '#2C3E50', fontWeight: '500' }}>
+                  {docAnterior ? docAnterior.name : 'Clique ou arraste o arquivo .docx'}
+                </p>
+                <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>
+                  Aceita: .docx
+                </p>
+                <input
+                  id="docAnterior"
+                  type="file"
+                  accept=".docx"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) setDocAnterior(file);
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Transcrição ou Áudio */}
+            <div>
+              <label style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: '#2C3E50',
+                marginBottom: '8px'
+              }}>
+                Transcrição ou Áudio do Dia
+              </label>
+              <div style={{
+                border: '2px dashed #F4A582',
+                borderRadius: '8px',
+                padding: '20px',
+                textAlign: 'center',
+                background: '#FFF8F5',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.background = '#FFE8DD';
+              }}
+              onDragLeave={(e) => {
+                e.currentTarget.style.background = '#FFF8F5';
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.background = '#FFF8F5';
+                const file = e.dataTransfer.files[0];
+                if (file) {
+                  setTranscricao(file);
+                }
+              }}
+              onClick={() => document.getElementById('transcricao')?.click()}
+              >
+                <Upload size={32} color="#F4A582" style={{ marginBottom: '8px' }} />
+                <p style={{ margin: '0 0 4px 0', color: '#2C3E50', fontWeight: '500' }}>
+                  {transcricao ? transcricao.name : 'Clique ou arraste o arquivo'}
+                </p>
+                <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>
+                  Aceita: .docx, .txt ou .mp3, .wav, .webm
+                </p>
+                <input
+                  id="transcricao"
+                  type="file"
+                  accept=".docx,.txt,.mp3,.wav,.webm,.m4a"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) setTranscricao(file);
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Botão Gerar */}
           <button
-            onClick={baixarDocx}
+            onClick={processarRound}
+            disabled={!podeProcessar || processando}
             style={{
               width: '100%',
-              padding: '12px',
+              padding: '16px',
+              fontSize: '18px',
+              fontWeight: '600',
+              color: 'white',
+              background: podeProcessar && !processando ? 'linear-gradient(135deg, #5B9BD5 0%, #2C3E50 100%)' : '#CCCCCC',
+              border: 'none',
+              borderRadius: '12px',
+              cursor: podeProcessar && !processando ? 'pointer' : 'not-allowed',
+              transition: 'all 0.3s',
+              boxShadow: podeProcessar && !processando ? '0 4px 12px rgba(91, 155, 213, 0.3)' : 'none',
+              marginBottom: '20px'
+            }}
+            onMouseEnter={(e) => {
+              if (podeProcessar && !processando) {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 6px 16px rgba(91, 155, 213, 0.4)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = podeProcessar && !processando ? '0 4px 12px rgba(91, 155, 213, 0.3)' : 'none';
+            }}
+          >
+            {processando ? '⏳ Processando...' : '📨 Gerar Round de Hoje'}
+          </button>
+
+          {/* Barra de Progresso */}
+          {processando && (
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{
+                width: '100%',
+                height: '8px',
+                background: '#E0E0E0',
+                borderRadius: '4px',
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  width: `${progresso}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #5B9BD5 0%, #F4A582 100%)',
+                  transition: 'width 0.3s'
+                }} />
+              </div>
+              <p style={{
+                marginTop: '8px',
+                fontSize: '14px',
+                color: '#2C3E50',
+                textAlign: 'center'
+              }}>
+                {mensagemProgresso}
+              </p>
+            </div>
+          )}
+
+          {/* Mensagem de Erro */}
+          {erro && (
+            <div style={{
+              padding: '16px',
+              background: '#FEE',
+              border: '2px solid #F88',
+              borderRadius: '8px',
+              color: '#C00',
+              marginBottom: '20px'
+            }}>
+              <strong>⚠️ Erro no processamento:</strong> {erro}
+            </div>
+          )}
+
+          {/* Mensagem de Sucesso */}
+          {sucesso && (
+            <div style={{
+              padding: '16px',
+              background: '#EFE',
+              border: '2px solid #8F8',
+              borderRadius: '8px',
+              color: '#080',
+              marginBottom: '20px',
+              textAlign: 'center'
+            }}>
+              <strong>✅ Round gerado com sucesso!</strong>
+              <br />
+              <small>O download do arquivo .docx iniciará automaticamente.</small>
+            </div>
+          )}
+        </div>
+
+        {/* Botões de Ação */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '16px',
+          marginBottom: '20px'
+        }}>
+          {/* Botão Microfone */}
+          <button
+            onClick={gravando ? pararGravacao : iniciarGravacao}
+            style={{
+              padding: '16px',
               fontSize: '16px',
               fontWeight: '600',
               color: 'white',
-              background: '#4caf50',
+              background: gravando ? 'linear-gradient(135deg, #F44336 0%, #D32F2F 100%)' : 'linear-gradient(135deg, #F4A582 0%, #E57373 100%)',
               border: 'none',
-              borderRadius: '8px',
+              borderRadius: '12px',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '8px'
+              gap: '8px',
+              transition: 'all 0.3s',
+              boxShadow: '0 4px 12px rgba(244, 165, 130, 0.3)'
             }}
           >
-            📥 Baixar {DocxGenerator.gerarNomeArquivo('Round')}
+            {gravando ? <MicOff size={20} /> : <Mic size={20} />}
+            {gravando ? 'Parar Gravação' : 'Gravar Feedback'}
           </button>
-        </div>
-      )}
 
-      {/* Regras Aprendidas */}
-      {regrasAprendidas.length > 0 && (
-        <div style={{ background: '#fff3e0', border: '1px solid #ff9800', borderRadius: '8px', padding: '16px' }}>
+          {/* Botão Histórico */}
           <button
-            onClick={() => setMostrarRegras(!mostrarRegras)}
+            onClick={() => setMostrarHistorico(!mostrarHistorico)}
             style={{
-              background: 'none',
-              border: 'none',
+              padding: '16px',
               fontSize: '16px',
               fontWeight: '600',
-              color: '#e65100',
+              color: '#2C3E50',
+              background: 'white',
+              border: '2px solid #5B9BD5',
+              borderRadius: '12px',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '8px',
-              marginBottom: mostrarRegras ? '12px' : '0'
+              transition: 'all 0.3s'
             }}
           >
-            📚 Regras Aprendidas ({regrasAprendidas.length})
-            <span>{mostrarRegras ? '▼' : '▶'}</span>
+            <History size={20} />
+            Histórico ({historico.length})
           </button>
 
-          {mostrarRegras && (
-            <div style={{ marginTop: '12px' }}>
-              {regrasAprendidas.map((regra) => (
-                <div key={regra.id} style={{ background: 'white', padding: '12px', borderRadius: '8px', marginBottom: '8px' }}>
-                  <p style={{ margin: 0, fontSize: '14px' }}>
-                    <strong>[{regra.tipo.toUpperCase()}]</strong> {regra.descricao}
-                  </p>
-                  {regra.exemplo && (
-                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#666' }}>
-                      Exemplo: {regra.exemplo}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Botão Regras */}
+          <button
+            onClick={() => setMostrarRegras(!mostrarRegras)}
+            style={{
+              padding: '16px',
+              fontSize: '16px',
+              fontWeight: '600',
+              color: '#2C3E50',
+              background: 'white',
+              border: '2px solid #5B9BD5',
+              borderRadius: '12px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              transition: 'all 0.3s'
+            }}
+          >
+            <BookOpen size={20} />
+            Regras ({regrasAprendidas.length})
+          </button>
         </div>
-      )}
+
+        {/* Preview de Áudio Gravado */}
+        {audioBlob && (
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '20px',
+            marginBottom: '20px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+          }}>
+            <h3 style={{ margin: '0 0 16px 0', color: '#2C3E50' }}>🎤 Feedback Gravado</h3>
+            <audio controls src={URL.createObjectURL(audioBlob)} style={{ width: '100%', marginBottom: '16px' }} />
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                onClick={enviarFeedback}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: 'white',
+                  background: 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer'
+                }}
+              >
+                📤 Enviar Feedback
+              </button>
+              <button
+                onClick={() => setAudioBlob(null)}
+                style={{
+                  padding: '12px 20px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: '#F44336',
+                  background: 'white',
+                  border: '2px solid #F44336',
+                  borderRadius: '8px',
+                  cursor: 'pointer'
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Histórico */}
+        {mostrarHistorico && (
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '24px',
+            marginBottom: '20px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.15)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, color: '#2C3E50' }}>📊 Histórico de Rounds</h3>
+              <button
+                onClick={() => setMostrarHistorico(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px'
+                }}
+              >
+                <X size={24} color="#666" />
+              </button>
+            </div>
+            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              {historico.length === 0 ? (
+                <p style={{ color: '#666', textAlign: 'center' }}>Nenhum round gerado ainda.</p>
+              ) : (
+                historico.map((item) => (
+                  <div key={item.id} style={{
+                    padding: '12px',
+                    border: '1px solid #E0E0E0',
+                    borderRadius: '8px',
+                    marginBottom: '8px'
+                  }}>
+                    <div style={{ fontWeight: '600', color: '#2C3E50' }}>{item.nome_arquivo}</div>
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                      {new Date(item.data_geracao).toLocaleString('pt-BR')}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Modal Regras */}
+        {mostrarRegras && (
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '24px',
+            marginBottom: '20px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.15)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, color: '#2C3E50' }}>📚 Regras Aprendidas</h3>
+              <button
+                onClick={() => setMostrarRegras(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px'
+                }}
+              >
+                <X size={24} color="#666" />
+              </button>
+            </div>
+            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              {regrasAprendidas.length === 0 ? (
+                <p style={{ color: '#666', textAlign: 'center' }}>Nenhuma regra aprendida ainda.</p>
+              ) : (
+                regrasAprendidas.map((regra) => (
+                  <div key={regra.id} style={{
+                    padding: '12px',
+                    border: '1px solid #E0E0E0',
+                    borderRadius: '8px',
+                    marginBottom: '8px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                      <div style={{ flex: 1 }}>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          background: '#5B9BD5',
+                          color: 'white',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          marginBottom: '8px'
+                        }}>
+                          {regra.tipo.toUpperCase()}
+                        </span>
+                        <div style={{ color: '#2C3E50', fontSize: '14px' }}>{regra.descricao}</div>
+                        {regra.exemplo && (
+                          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px', fontStyle: 'italic' }}>
+                            Ex: {regra.exemplo}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div style={{
+          textAlign: 'center',
+          color: '#2C3E50',
+          fontSize: '14px',
+          opacity: 0.7,
+          marginTop: '40px'
+        }}>
+          <p style={{ margin: '0 0 8px 0' }}>
+            Powered by Cerebras + Gemini + Groq
+          </p>
+          <p style={{ margin: 0 }}>
+            100% Gratuito • Custo: R$ 0,00
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
