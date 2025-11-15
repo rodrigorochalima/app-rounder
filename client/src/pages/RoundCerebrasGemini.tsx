@@ -8,7 +8,7 @@ import { Mic, MicOff, Upload, Download, History, BookOpen, Trash2, X } from 'luc
 export default function RoundCerebrasGemini() {
   // Estados de configuração
   const [cerebrasKey, setCerebrasKey] = useState('');
-  const [geminiKey, setGeminiKey] = useState('');
+  const [deepseekKey, setDeepseekKey] = useState('');
   const [groqKey, setGroqKey] = useState('');
 
   // Estados de documentos
@@ -48,16 +48,16 @@ export default function RoundCerebrasGemini() {
 
     if (!ultimaLimpeza || (agora - parseInt(ultimaLimpeza)) > umDia) {
       // Limpar apenas se passou mais de 1 dia
-      localStorage.removeItem('gemini_api_key');
+      localStorage.removeItem('deepseek_api_key');
       localStorage.setItem('ultima_limpeza_keys', agora.toString());
     }
 
     const savedCerebras = localStorage.getItem('cerebras_api_key');
-    const savedGemini = localStorage.getItem('gemini_api_key');
+    const savedDeepSeek = localStorage.getItem('deepseek_api_key');
     const savedGroq = localStorage.getItem('groq_api_key');
 
     if (savedCerebras) setCerebrasKey(savedCerebras);
-    if (savedGemini) setGeminiKey(savedGemini);
+    if (savedDeepSeek) setDeepseekKey(savedDeepSeek);
     if (savedGroq) setGroqKey(savedGroq);
 
     // Carregar regras do Supabase
@@ -81,9 +81,9 @@ export default function RoundCerebrasGemini() {
     if (key) localStorage.setItem('cerebras_api_key', key);
   };
 
-  const salvarGeminiKey = (key: string) => {
-    setGeminiKey(key);
-    if (key) localStorage.setItem('gemini_api_key', key);
+  const salvarDeepSeekKey = (key: string) => {
+    setDeepseekKey(key);
+    if (key) localStorage.setItem('deepseek_api_key', key);
   };
 
   const salvarGroqKey = (key: string) => {
@@ -92,7 +92,7 @@ export default function RoundCerebrasGemini() {
   };
 
   // Verificar se pode processar
-  const podeProcessar = cerebrasKey.length > 10 && geminiKey.length > 10 && groqKey.length > 10 && docAnterior !== null && transcricao !== null;
+  const podeProcessar = cerebrasKey.length > 10 && deepseekKey.length > 10 && groqKey.length > 10 && docAnterior !== null && transcricao !== null;
 
   // Ler arquivo .docx
   const lerDocx = async (file: File): Promise<string> => {
@@ -112,7 +112,7 @@ export default function RoundCerebrasGemini() {
     setDocumentoGerado('');
 
     try {
-      const processador = new ProcessadorRound(cerebrasKey, geminiKey, groqKey);
+      const processador = new ProcessadorRound(cerebrasKey, deepseekKey, groqKey);
 
       // Ler documento anterior
       setMensagemProgresso('📄 Lendo documento anterior...');
@@ -348,7 +348,7 @@ export default function RoundCerebrasGemini() {
               </a>
             </div>
 
-            {/* Gemini */}
+            {/* DeepSeek */}
             <div style={{ marginBottom: '16px' }}>
               <label style={{
                 display: 'block',
@@ -357,13 +357,13 @@ export default function RoundCerebrasGemini() {
                 color: '#2C3E50',
                 marginBottom: '8px'
               }}>
-                Google Gemini API Key ✅
+                DeepSeek API Key ✅
               </label>
               <input
                 type="password"
-                value={geminiKey}
-                onChange={(e) => salvarGeminiKey(e.target.value)}
-                placeholder="Cole sua Gemini API Key aqui..."
+                value={deepseekKey}
+                onChange={(e) => salvarDeepSeekKey(e.target.value)}
+                placeholder="Cole sua DeepSeek API Key aqui..."
                 style={{
                   width: '100%',
                   padding: '12px 16px',
@@ -378,7 +378,7 @@ export default function RoundCerebrasGemini() {
                 onBlur={(e) => e.target.style.borderColor = '#E0E0E0'}
               />
               <a 
-                href="https://aistudio.google.com/apikey" 
+                href="https://platform.deepseek.com/api_keys" 
                 target="_blank" 
                 rel="noopener noreferrer"
                 style={{
@@ -389,7 +389,7 @@ export default function RoundCerebrasGemini() {
                   display: 'inline-block'
                 }}
               >
-                Obter em: aistudio.google.com/apikey (gratuito)
+                Obter em: platform.deepseek.com (gratuito)
               </a>
             </div>
 
@@ -905,7 +905,7 @@ export default function RoundCerebrasGemini() {
           marginTop: '40px'
         }}>
           <p style={{ margin: '0 0 8px 0' }}>
-            Powered by Cerebras + Gemini + Groq
+            Powered by Cerebras + DeepSeek + Groq
           </p>
           <p style={{ margin: 0 }}>
             100% Gratuito • Custo: R$ 0,00

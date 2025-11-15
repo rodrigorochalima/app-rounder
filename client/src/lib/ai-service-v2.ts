@@ -1,8 +1,8 @@
 /**
- * Serviço de IA com Cerebras + Gemini (100% GRATUITO)
+ * Serviço de IA com Cerebras + DeepSeek + Groq (100% GRATUITO)
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
+// DeepSeek não precisa de biblioteca externa, usa fetch direto
 import { validarTerminologiaMedica, formatarRelatorioCorrecoes } from './validador-medico';
 import { buscarRegrasAtivas } from './supabase';
 
@@ -69,28 +69,23 @@ export class CerebrasAgent {
 }
 
 // ============================================
-// GEMINI API (AGENTE 2 - Validação)
+// DEEPSEEK API (AGENTE 2 - Validação)
 // ============================================
 
-export class GeminiAgent {
-  private genAI: GoogleGenerativeAI;
+export class DeepSeekAgent {
+  private apiKey: string;
+  private baseURL = 'https://api.deepseek.com/v1';
 
   constructor(apiKey: string) {
-    this.genAI = new GoogleGenerativeAI(apiKey);
+    this.apiKey = apiKey;
   }
 
   async validar(documentoBruto: string, onProgress?: (progress: number, message: string) => void): Promise<string> {
     try {
-      if (onProgress) onProgress(70, '🔍 AGENTE 2: Validando com Gemini...');
+      if (onProgress) onProgress(70, '🔍 AGENTE 2: Validando com DeepSeek...');
 
-      console.log('[GEMINI] Iniciando validação...');
-      const model = this.genAI.getGenerativeModel({ 
-        model: 'gemini-2.0-flash-exp',
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 8000,
-        }
-      });
+      console.log('[DEEPSEEK] Iniciando validação...');
+      console.log('[DEEPSEEK] API Key:', this.apiKey.substring(0, 10) + '...');
 
       const prompt = `
 Você é um validador de documentos médicos. Analise o documento abaixo e:
@@ -107,23 +102,50 @@ ${documentoBruto}
 Retorne APENAS o documento corrigido, sem explicações adicionais.
 `;
 
-      const result = await model.generateContent(prompt);
-      console.log('[GEMINI] Resposta recebida');
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            {
+              role: 'system',
+              content: 'Você é um validador de documentos médicos especializado em rounds de UTI.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 8000,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[DEEPSEEK] Erro HTTP:', response.status, response.statusText);
+        console.error('[DEEPSEEK] Resposta:', errorText);
+        throw new Error(`DeepSeek Error [${response.status}]: ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('[DEEPSEEK] Resposta recebida');
       
-      const response = await result.response;
-      console.log('[GEMINI] Status:', response);
-      
-      const documentoFinal = response.text();
-      console.log('[GEMINI] Documento validado com sucesso');
+      const documentoFinal = data.choices[0].message.content;
+      console.log('[DEEPSEEK] Documento validado com sucesso');
 
       if (onProgress) onProgress(90, '✅ AGENTE 2: Validação concluída!');
 
       return documentoFinal;
     } catch (error: any) {
-      console.error('[GEMINI] Erro completo:', error);
-      console.error('[GEMINI] Stack:', error.stack);
-      console.error('[GEMINI] Message:', error.message);
-      throw new Error(`Erro no Gemini: ${error.message}`);
+      console.error('[DEEPSEEK] Erro completo:', error);
+      console.error('[DEEPSEEK] Stack:', error.stack);
+      console.error('[DEEPSEEK] Message:', error.message);
+      throw new Error(`Erro no DeepSeek: ${error.message}`);
     }
   }
 }
@@ -245,14 +267,14 @@ export class SistemaAprendizado {
 
 export class ProcessadorRound {
   private cerebras: CerebrasAgent;
-  private gemini: GeminiAgent;
+  private deepseek: DeepSeekAgent;
   private whisper: GroqWhisper;
   private aprendizado: SistemaAprendizado;
   private groqKey: string;
 
-  constructor(cerebrasKey: string, geminiKey: string, groqKey: string) {
+  constructor(cerebrasKey: string, deepseekKey: string, groqKey: string) {
     this.cerebras = new CerebrasAgent(cerebrasKey);
-    this.gemini = new GeminiAgent(geminiKey);
+    this.deepseek = new DeepSeekAgent(deepseekKey);
     this.whisper = new GroqWhisper(groqKey);
     this.aprendizado = new SistemaAprendizado();
     this.groqKey = groqKey;
@@ -303,8 +325,8 @@ GERE O ROUND DE HOJE:
 
       const documentoBruto = await this.cerebras.processar(promptProcessamento, onProgress);
 
-      // ETAPA 2: Validação com Gemini
-      const documentoValidado = await this.gemini.validar(documentoBruto, onProgress);
+      // ETAPA 2: Validação com DeepSeek
+      const documentoValidado = await this.deepseek.validar(documentoBruto, onProgress);
 
       // ETAPA 3: Validação de Terminologia Médica com Groq
       if (onProgress) onProgress(92, '🏥 AGENTE 3: Validando terminologia médica...');
@@ -345,7 +367,7 @@ GERE O ROUND DE HOJE:
       // Transcrever feedback
       const feedbackTexto = await this.whisper.transcrever(feedbackAudio, onProgress);
 
-      // Analisar feedback com Gemini
+      // Analisar feedback com DeepSeek
       if (onProgress) onProgress(50, '🧠 Analisando feedback...');
 
       const promptAnalise = `
@@ -366,10 +388,29 @@ Retorne um JSON com as regras no formato:
 Retorne APENAS o JSON, sem explicações.
 `;
 
-      const model = this.gemini['genAI'].getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
-      const result = await model.generateContent(promptAnalise);
-      const response = await result.response;
-      const regrasJSON = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const response = await fetch(`${this.deepseek['baseURL']}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.deepseek['apiKey']}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'system', content: 'Você é um assistente que extrai regras de feedbacks médicos.' },
+            { role: 'user', content: promptAnalise }
+          ],
+          temperature: 0.3,
+          max_tokens: 2000,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`DeepSeek Error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const regrasJSON = data.choices[0].message.content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
       const regras = JSON.parse(regrasJSON);
 
