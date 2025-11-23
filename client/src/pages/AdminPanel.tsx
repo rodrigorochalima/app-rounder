@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation } from 'wouter';
 import {
   getInstitutions,
   getApiKeysDecrypted,
@@ -15,7 +15,7 @@ import {
 const ADMIN_PASSWORD = 'app-rounder-admin-2025'; // Em produção, usar hash e Supabase
 
 export default function AdminPanel() {
-  const navigate = useNavigate();
+  const [, setLocation] = useLocation();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -209,7 +209,7 @@ export default function AdminPanel() {
 
           <div className="mt-6 text-center">
             <button
-              onClick={() => navigate('/')}
+              onClick={() => setLocation('/')}
               className="text-sm text-gray-600 hover:text-gray-800"
             >
               ← Voltar para o app
@@ -233,7 +233,7 @@ export default function AdminPanel() {
             </div>
             <div className="flex items-center gap-4">
               <button
-                onClick={() => navigate('/')}
+                onClick={() => setLocation('/')}
                 className="px-4 py-2 text-gray-700 hover:text-gray-900 font-medium"
               >
                 ← Voltar ao App
