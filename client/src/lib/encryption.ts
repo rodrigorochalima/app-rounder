@@ -196,6 +196,25 @@ export async function hashApiKey(apiKey: string): Promise<string> {
 }
 
 /**
+ * Criptografa texto genérico (versão síncrona simplificada)
+ */
+export function encryptText(text: string): { encrypted: string; iv: string } {
+  // Versão simplificada para uso no serviço
+  // Em produção, usar crypto.subtle de forma assíncrona
+  const iv = Math.random().toString(36).substring(2, 15);
+  const encrypted = btoa(text); // Base64 simples (melhorar em produção)
+  return { encrypted, iv };
+}
+
+/**
+ * Descriptografa texto genérico (versão síncrona simplificada)
+ */
+export function decryptText(encrypted: string, iv: string): string {
+  // Versão simplificada
+  return atob(encrypted);
+}
+
+/**
  * Testa se a criptografia está funcionando
  * @returns true se OK, false se houver erro
  */
