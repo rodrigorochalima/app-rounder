@@ -10,6 +10,7 @@ import RoundGroq from "./pages/RoundGroq";
 import RoundGroqPaste from "./pages/RoundGroqPaste";
 import RoundOpenAI from "./pages/RoundOpenAI";
 import RoundCerebrasGemini from "./pages/RoundCerebrasGemini";
+import AdminPanel from "./pages/AdminPanel";
 
 function Router() {
   const base = import.meta.env.BASE_URL;
@@ -17,6 +18,7 @@ function Router() {
     <WouterRouter base={base}>
     <Switch>
       <Route path={"/"} component={RoundCerebrasGemini} />
+      <Route path={"/admin"} component={AdminPanel} />
       <Route path={"/openai"} component={RoundOpenAI} />
       <Route path={"/paste"} component={RoundGroqPaste} />
       <Route path={"/upload"} component={RoundGroq} />
