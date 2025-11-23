@@ -12,6 +12,7 @@ import RoundGroqPaste from "./pages/RoundGroqPaste";
 import RoundOpenAI from "./pages/RoundOpenAI";
 import RoundCerebrasGemini from "./pages/RoundCerebrasGemini";
 import AdminPanel from "./pages/AdminPanel";
+import AuthCallbackPage from "./pages/AuthCallbackPage";
 import AuthPage from "./pages/AuthPage";
 import APIKeysPage from "./pages/APIKeysPage";
 
@@ -23,7 +24,8 @@ function Router() {
       <Route path={"/"} component={RoundCerebrasGemini} />
       <Route path={"/auth"} component={AuthPage} />
       <Route path={"/api-keys"} component={APIKeysPage} />
-      <Route path={"/admin"} component={AdminPanel} />
+      <Route path="/admin" component={AdminPanel} />
+      <Route path="/auth/callback" component={AuthCallbackPage} />
       <Route path={"/openai"} component={RoundOpenAI} />
       <Route path={"/paste"} component={RoundGroqPaste} />
       <Route path={"/upload"} component={RoundGroq} />
