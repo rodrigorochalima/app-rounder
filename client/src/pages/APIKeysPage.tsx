@@ -1,6 +1,6 @@
 /**
  * Página de Gerenciamento de API Keys
- * Mobile-first, design profissional
+ * Mobile-first com paleta de cores do ícone Rounder
  */
 
 import { useState, useEffect } from 'react';
@@ -109,25 +109,25 @@ export default function APIKeysPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-gradient-to-br from-[#A8D8EA] via-[#87CEEB] to-[#5B9BD5] flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50">
+    <div className="min-h-screen bg-gradient-to-br from-[#A8D8EA] via-[#87CEEB] to-[#5B9BD5]">
       {/* Header mobile-first */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
+      <div className="bg-white/95 backdrop-blur border-b border-[#5B9BD5]/20 sticky top-0 z-10 shadow-lg">
         <div className="px-4 py-4">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">🔑 API Keys</h1>
+          <h1 className="text-2xl font-bold text-[#2C3E50] mb-2">🔑 API Keys</h1>
           
           {/* Seletor de instituição */}
           {institutions.length > 1 && (
             <select
               value={selectedInstitution}
               onChange={(e) => setSelectedInstitution(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-3 border-2 border-[#5B9BD5] rounded-2xl focus:ring-2 focus:ring-[#4A90E2] bg-white text-[#2C3E50] font-medium"
             >
               {institutions.map(inst => (
                 <option key={inst.id} value={inst.id}>{inst.name}</option>
@@ -143,7 +143,7 @@ export default function APIKeysPage() {
         {!showAddForm && (
           <button
             onClick={() => setShowAddForm(true)}
-            className="w-full mb-4 py-4 bg-blue-500 text-white rounded-xl font-semibold shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"
+            className="w-full mb-4 py-4 bg-[#5B9BD5] hover:bg-[#4A90E2] text-white rounded-2xl font-bold shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2"
           >
             <Plus className="w-5 h-5" />
             Adicionar API Key
@@ -152,26 +152,26 @@ export default function APIKeysPage() {
 
         {/* Formulário de adicionar */}
         {showAddForm && (
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-4">
+          <div className="bg-white rounded-3xl shadow-2xl p-6 mb-4">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">Nova API Key</h2>
+              <h2 className="text-lg font-bold text-[#2C3E50]">Nova API Key</h2>
               <button
                 onClick={() => setShowAddForm(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
+                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
 
             {/* Seletor de provider */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-[#2C3E50] mb-2">
                 Provedor de IA
               </label>
               <select
                 value={selectedProvider}
                 onChange={(e) => setSelectedProvider(e.target.value as AIProvider)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-3 border-2 border-[#5B9BD5] rounded-2xl focus:ring-2 focus:ring-[#4A90E2] bg-white text-[#2C3E50] font-medium"
               >
                 {Object.values(AI_PROVIDERS).map(provider => (
                   <option key={provider.id} value={provider.id}>
@@ -181,11 +181,11 @@ export default function APIKeysPage() {
               </select>
 
               {/* Info do provider */}
-              <div className="mt-3 p-3 bg-blue-50 rounded-xl text-sm">
-                <p className="text-gray-700 mb-2">{providerInfo.description}</p>
-                <div className="flex flex-wrap gap-2">
+              <div className="mt-3 p-4 bg-[#A8D8EA]/30 rounded-2xl border border-[#5B9BD5]/30">
+                <p className="text-[#2C3E50] mb-2 font-medium">{providerInfo.description}</p>
+                <div className="flex flex-wrap gap-2 mb-3">
                   {providerInfo.features.map(feature => (
-                    <span key={feature} className="px-2 py-1 bg-white rounded-lg text-xs text-gray-600">
+                    <span key={feature} className="px-3 py-1 bg-white rounded-xl text-xs text-[#2C3E50] font-medium shadow-sm">
                       {feature}
                     </span>
                   ))}
@@ -194,7 +194,7 @@ export default function APIKeysPage() {
                   href={providerInfo.signupUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-block mt-2 text-blue-500 hover:underline text-sm font-medium"
+                  className="inline-block text-[#5B9BD5] hover:text-[#4A90E2] text-sm font-bold"
                 >
                   Obter API Key →
                 </a>
@@ -203,7 +203,7 @@ export default function APIKeysPage() {
 
             {/* Nome */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-[#2C3E50] mb-2">
                 Nome da Key
               </label>
               <input
@@ -211,13 +211,13 @@ export default function APIKeysPage() {
                 value={keyName}
                 onChange={(e) => setKeyName(e.target.value)}
                 placeholder="Ex: Qwen Production"
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-2xl focus:ring-2 focus:ring-[#5B9BD5] focus:border-transparent transition-all"
               />
             </div>
 
             {/* API Key */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-[#2C3E50] mb-2">
                 API Key
               </label>
               <div className="relative">
@@ -226,12 +226,12 @@ export default function APIKeysPage() {
                   value={keyValue}
                   onChange={(e) => setKeyValue(e.target.value)}
                   placeholder="Cole sua API key aqui..."
-                  className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                  className="w-full px-4 py-3 pr-12 border-2 border-gray-200 rounded-2xl focus:ring-2 focus:ring-[#5B9BD5] focus:border-transparent font-mono text-sm"
                 />
                 <button
                   type="button"
                   onClick={() => setShowKey(!showKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#5B9BD5] transition-colors"
                 >
                   {showKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
@@ -242,14 +242,14 @@ export default function APIKeysPage() {
             <div className="flex gap-3">
               <button
                 onClick={() => setShowAddForm(false)}
-                className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium"
+                className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-2xl font-semibold hover:bg-gray-200 transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleAddKey}
                 disabled={saving}
-                className="flex-1 py-3 bg-green-500 text-white rounded-xl font-semibold disabled:opacity-50"
+                className="flex-1 py-3 bg-[#4A90E2] hover:bg-[#5B9BD5] text-white rounded-2xl font-bold disabled:opacity-50 transition-all shadow-lg"
               >
                 {saving ? 'Salvando...' : 'Salvar'}
               </button>
@@ -260,36 +260,36 @@ export default function APIKeysPage() {
         {/* Lista de API keys */}
         <div className="space-y-3">
           {apiKeys.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              <Key className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-              <p>Nenhuma API key configurada</p>
-              <p className="text-sm">Adicione uma para começar</p>
+            <div className="text-center py-16 text-white">
+              <Key className="w-20 h-20 mx-auto mb-4 opacity-60" />
+              <p className="text-xl font-bold mb-2">Nenhuma API key configurada</p>
+              <p className="text-lg opacity-90">Adicione uma para começar</p>
             </div>
           ) : (
             apiKeys.map(key => (
-              <div key={key.id} className="bg-white rounded-xl shadow p-4">
+              <div key={key.id} className="bg-white rounded-2xl shadow-lg p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-semibold text-gray-900">{key.name}</h3>
+                      <h3 className="font-bold text-[#2C3E50]">{key.name}</h3>
                       {key.isDefault && (
-                        <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">
+                        <span className="px-2 py-0.5 bg-[#A8D8EA] text-[#2C3E50] text-xs rounded-full font-bold">
                           Padrão
                         </span>
                       )}
                       {!key.isActive && (
-                        <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+                        <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full font-medium">
                           Inativa
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-gray-600">
+                    <p className="text-sm text-[#5B9BD5] font-medium">
                       {AI_PROVIDERS[key.provider as AIProvider]?.name || key.provider}
                     </p>
                   </div>
                   <button
                     onClick={() => handleDeleteKey(key.id)}
-                    className="p-2 hover:bg-red-50 rounded-lg text-red-500"
+                    className="p-2 hover:bg-red-50 rounded-xl text-red-500 transition-colors"
                   >
                     <Trash2 className="w-5 h-5" />
                   </button>
@@ -297,7 +297,7 @@ export default function APIKeysPage() {
 
                 {/* Stats */}
                 <div className="flex items-center gap-4 text-xs text-gray-600 mb-3">
-                  <span>Uso: {key.usageCount || 0}x</span>
+                  <span className="font-medium">Uso: {key.usageCount || 0}x</span>
                   {key.lastUsedAt && (
                     <span>Último uso: {new Date(key.lastUsedAt).toLocaleDateString()}</span>
                   )}
@@ -306,7 +306,7 @@ export default function APIKeysPage() {
                 {/* Botão testar */}
                 <button
                   onClick={() => handleTestKey(key.id)}
-                  className="w-full py-2 bg-blue-50 text-blue-600 rounded-lg font-medium text-sm flex items-center justify-center gap-2 hover:bg-blue-100"
+                  className="w-full py-2 bg-[#A8D8EA]/30 text-[#2C3E50] rounded-xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-[#A8D8EA]/50 transition-colors"
                 >
                   <TestTube className="w-4 h-4" />
                   Testar Conexão
