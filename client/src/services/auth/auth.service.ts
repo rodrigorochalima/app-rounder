@@ -97,7 +97,8 @@ export async function signup(data: SignupData): Promise<AuthSession> {
   }
 
   // Criar perfil do usuário manualmente (não depender do trigger)
-  const { data: userData, error: insertError } = await supabase
+  let userData;
+  const { data: insertData, error: insertError } = await supabase
     .from('user_profiles')
     .insert({
       user_id: authData.user.id,
@@ -127,7 +128,7 @@ export async function signup(data: SignupData): Promise<AuthSession> {
       }
       
       // Atualizar com dados completos
-      const { data: updatedUser } = await supabase
+      const { data: updatedUser, error: updateError } = await supabase
         .from('user_profiles')
         .update({
           crm,
@@ -139,12 +140,16 @@ export async function signup(data: SignupData): Promise<AuthSession> {
         .select()
         .single();
       
-      if (!updatedUser) {
-        throw new Error('Erro ao atualizar perfil');
+      if (updateError || !updatedUser) {
+        throw new Error(`Erro ao atualizar perfil: ${updateError?.message || 'Perfil não encontrado'}`);
       }
+      
+      userData = updatedUser;
     } else {
       throw new Error(`Erro ao criar perfil: ${insertError.message}`);
     }
+  } else {
+    userData = insertData;
   }
 
   if (!userData) {
