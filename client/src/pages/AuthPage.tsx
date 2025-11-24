@@ -297,11 +297,11 @@ export default function AuthPage() {
 
         {/* Footer */}
         <div className="text-center mt-6 text-white drop-shadow">
-          <p className="text-sm font-medium">
-            Powered by Cerebras + Gemini + Groq
+          <p className="text-sm font-medium opacity-90">
+            Nexo Soluções Digitais
           </p>
-          <p className="text-lg font-bold">
-            100% Gratuito • Custo R$ 0,00
+          <p className="text-xs opacity-75">
+            App Rounder • Gerador Inteligente de Rounds Médicos
           </p>
         </div>
       </div>

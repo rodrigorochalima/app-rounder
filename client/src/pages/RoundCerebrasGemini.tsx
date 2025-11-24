@@ -904,11 +904,11 @@ export default function RoundCerebrasGemini() {
           opacity: 0.7,
           marginTop: '40px'
         }}>
-          <p style={{ margin: '0 0 8px 0' }}>
-            Powered by Cerebras + DeepSeek + Groq
+          <p style={{ margin: '0 0 8px 0', fontWeight: 500 }}>
+            Nexo Soluções Digitais
           </p>
-          <p style={{ margin: 0 }}>
-            100% Gratuito • Custo: R$ 0,00
+          <p style={{ margin: 0, fontSize: '12px' }}>
+            App Rounder • Gerador Inteligente de Rounds Médicos
           </p>
         </div>
       </div>
