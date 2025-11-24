@@ -100,34 +100,60 @@ export async function signup(data: SignupData): Promise<AuthSession> {
     throw new Error('Erro ao criar usuário');
   }
 
-  // O trigger handle_new_user() já cria o user_profile automaticamente
-  // Aguardar um pouco para o trigger executar
-  await new Promise(resolve => setTimeout(resolve, 1500));
-
-  // Buscar dados completos do user_profile
-  const { data: userData, error: userError } = await supabase
+  // Criar perfil do usuário manualmente (não depender do trigger)
+  const { data: userData, error: insertError } = await supabase
     .from('user_profiles')
-    .select('*')
-    .eq('user_id', authData.user.id)
+    .insert({
+      user_id: authData.user.id,
+      email: email,
+      full_name: fullName,
+      crm: crm || '',
+      crm_state: crmState || '',
+      specialty: specialty || '',
+      phone: phone || '',
+      role: 'rotineiro',
+      email_confirmed: false,
+      is_active: true
+    })
+    .select()
     .single();
 
-  if (userError || !userData) {
-    throw new Error(`Erro ao buscar perfil: ${userError?.message || 'Perfil não encontrado'}`);
+  if (insertError) {
+    // Se o perfil já existe (trigger criou), buscar ao invés de inserir
+    if (insertError.code === '23505') {
+      const { data: existingUser, error: fetchError } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', authData.user.id)
+        .single();
+      
+      if (fetchError || !existingUser) {
+        throw new Error(`Erro ao buscar perfil: ${fetchError?.message || 'Perfil não encontrado'}`);
+      }
+      
+      // Atualizar com dados completos
+      const { data: updatedUser } = await supabase
+        .from('user_profiles')
+        .update({
+          crm,
+          crm_state: crmState,
+          specialty,
+          phone
+        })
+        .eq('user_id', authData.user.id)
+        .select()
+        .single();
+      
+      if (!updatedUser) {
+        throw new Error('Erro ao atualizar perfil');
+      }
+    } else {
+      throw new Error(`Erro ao criar perfil: ${insertError.message}`);
+    }
   }
 
-  // Atualizar dados adicionais do perfil
-  const { error: updateError } = await supabase
-    .from('user_profiles')
-    .update({
-      crm,
-      crm_state: crmState,
-      specialty,
-      phone
-    })
-    .eq('user_id', authData.user.id);
-
-  if (updateError) {
-    console.warn('Erro ao atualizar dados adicionais:', updateError);
+  if (!userData) {
+    throw new Error('Erro ao criar perfil do usuário');
   }
 
   // Criar log de auditoria
