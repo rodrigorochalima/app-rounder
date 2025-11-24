@@ -14,7 +14,7 @@ DROP TABLE IF EXISTS institutions CASCADE;
 DROP TABLE IF EXISTS user_profiles CASCADE;
 DROP TABLE IF EXISTS terms_acceptance CASCADE;
 DROP TABLE IF EXISTS power_bi_exports CASCADE;
-DROP TABLE IF EXISTS epmed_integrations CASCADE;
+DROP TABLE IF EXISTS epimed_integrations CASCADE;
 
 -- ============================================================================
 -- 1. PERFIS DE USUÁRIO
@@ -196,10 +196,10 @@ CREATE TABLE power_bi_exports (
 );
 
 -- ============================================================================
--- 11. INTEGRAÇÕES EPMED
+-- 11. INTEGRAÇÕES EPIMED
 -- ============================================================================
 
-CREATE TABLE epmed_integrations (
+CREATE TABLE epimed_integrations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   institution_id UUID REFERENCES institutions(id) ON DELETE CASCADE NOT NULL,
   api_endpoint TEXT NOT NULL,
@@ -230,7 +230,7 @@ CREATE INDEX idx_institution_rules_institution_id ON institution_rules(instituti
 CREATE INDEX idx_api_usage_logs_institution_id ON api_usage_logs(institution_id);
 CREATE INDEX idx_api_usage_logs_created_at ON api_usage_logs(created_at);
 CREATE INDEX idx_power_bi_exports_institution_id ON power_bi_exports(institution_id);
-CREATE INDEX idx_epmed_integrations_institution_id ON epmed_integrations(institution_id);
+CREATE INDEX idx_epimed_integrations_institution_id ON epimed_integrations(institution_id);
 
 -- ============================================================================
 -- ROW LEVEL SECURITY (RLS)
@@ -246,7 +246,7 @@ ALTER TABLE institution_rules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE api_usage_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE terms_acceptance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE power_bi_exports ENABLE ROW LEVEL SECURITY;
-ALTER TABLE epmed_integrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE epimed_integrations ENABLE ROW LEVEL SECURITY;
 
 -- Policies para user_profiles
 CREATE POLICY "Users can view own profile" ON user_profiles FOR SELECT USING (auth.uid() = user_id);
@@ -371,7 +371,7 @@ COMMENT ON TABLE bed_assignments IS 'Leitos mapeados em cada subárea';
 COMMENT ON TABLE institution_api_keys IS 'Até 3 API keys simultâneas por instituição';
 COMMENT ON TABLE institution_rules IS 'Até 40 regras personalizáveis por instituição';
 COMMENT ON TABLE power_bi_exports IS 'Exportações para integração com Power BI';
-COMMENT ON TABLE epmed_integrations IS 'Integrações com sistema EPMED';
+COMMENT ON TABLE epimed_integrations IS 'Integrações com sistema EPIMED';
 
 -- ============================================================================
 -- FIM DO SCHEMA

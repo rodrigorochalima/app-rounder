@@ -196,7 +196,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   </li>
                   <li className="flex items-start gap-2">
                     <Check className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-                    <span><strong>EPMED:</strong> Integração direta com prontuário eletrônico</span>
+                    <span><strong>EPIMED:</strong> Integração com sistema de gestão hospitalar</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <Check className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
