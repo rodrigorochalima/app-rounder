@@ -11,15 +11,8 @@ export interface User {
   specialty?: string;
   crm?: string;
   crmState?: string;
-  isActive: boolean;
-  emailConfirmed: boolean;
-  termsAccepted: boolean;
-  termsAcceptedAt?: string;
-  privacyAccepted: boolean;
-  privacyAcceptedAt?: string;
-  dataCollectionConsent: boolean;
-  dataCollectionConsentAt?: string;
-  lastLoginAt?: string;
+  role: string;
+  onboardingCompleted: boolean;
   createdAt: string;
   updatedAt: string;
 }

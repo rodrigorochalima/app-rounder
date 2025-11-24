@@ -47,11 +47,7 @@ export async function login(credentials: LoginCredentials): Promise<AuthSession>
     throw new Error('Erro ao buscar dados do usuário');
   }
 
-  // Atualizar último login
-  await supabase
-    .from('user_profiles')
-    .update({ last_login_at: new Date().toISOString() })
-    .eq('user_id', authData.user.id);
+  // Login realizado com sucesso
 
   // Criar log de auditoria
   await createAuditLog({
@@ -112,8 +108,7 @@ export async function signup(data: SignupData): Promise<AuthSession> {
       specialty: specialty || '',
       phone: phone || '',
       role: 'rotineiro',
-      email_confirmed: false,
-      is_active: true
+      onboarding_completed: false
     })
     .select()
     .single();
@@ -258,15 +253,9 @@ export async function confirmEmail(confirmation: EmailConfirmation): Promise<voi
     throw new Error(`Erro ao confirmar email: ${error.message}`);
   }
 
-  // Atualizar flag de email confirmado
   const { data: { user } } = await supabase.auth.getUser();
   
   if (user) {
-    await supabase
-      .from('user_profiles')
-      .update({ email_confirmed: true })
-      .eq('user_id', user.id);
-
     await createAuditLog({
       userId: user.id,
       action: 'email_confirmed',
@@ -277,41 +266,13 @@ export async function confirmEmail(confirmation: EmailConfirmation): Promise<voi
 }
 
 /**
- * Aceita termos legais
+ * Aceita termos legais (placeholder para compatibilidade)
  */
 export async function acceptLegalTerms(acceptance: LegalAcceptance): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   
   if (!user) {
     throw new Error('Usuário não autenticado');
-  }
-
-  const now = new Date().toISOString();
-
-  const updates: any = {};
-  
-  if (acceptance.termsAccepted) {
-    updates.terms_accepted = true;
-    updates.terms_accepted_at = now;
-  }
-  
-  if (acceptance.privacyAccepted) {
-    updates.privacy_accepted = true;
-    updates.privacy_accepted_at = now;
-  }
-  
-  if (acceptance.dataCollectionConsent) {
-    updates.data_collection_consent = true;
-    updates.data_collection_consent_at = now;
-  }
-
-  const { error } = await supabase
-    .from('user_profiles')
-    .update(updates)
-    .eq('user_id', user.id);
-
-  if (error) {
-    throw new Error(`Erro ao aceitar termos: ${error.message}`);
   }
 
   // Registrar aceitação nos logs
@@ -404,15 +365,8 @@ function mapSupabaseUserToUser(data: any): User {
     specialty: data.specialty,
     crm: data.crm,
     crmState: data.crm_state,
-    isActive: data.is_active,
-    emailConfirmed: data.email_confirmed,
-    termsAccepted: data.terms_accepted,
-    termsAcceptedAt: data.terms_accepted_at,
-    privacyAccepted: data.privacy_accepted,
-    privacyAcceptedAt: data.privacy_accepted_at,
-    dataCollectionConsent: data.data_collection_consent,
-    dataCollectionConsentAt: data.data_collection_consent_at,
-    lastLoginAt: data.last_login_at,
+    role: data.role || 'rotineiro',
+    onboardingCompleted: data.onboarding_completed || false,
     createdAt: data.created_at,
     updatedAt: data.updated_at
   };
