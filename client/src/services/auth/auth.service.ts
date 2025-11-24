@@ -36,11 +36,11 @@ export async function login(credentials: LoginCredentials): Promise<AuthSession>
     throw new Error('Erro ao obter dados do usuário');
   }
 
-  // Buscar dados completos do usuário
+  // Buscar dados completos do user_profile
   const { data: userData, error: userError } = await supabase
-    .from('users')
+    .from('user_profiles')
     .select('*')
-    .eq('id', authData.user.id)
+    .eq('user_id', authData.user.id)
     .single();
 
   if (userError || !userData) {
@@ -49,9 +49,9 @@ export async function login(credentials: LoginCredentials): Promise<AuthSession>
 
   // Atualizar último login
   await supabase
-    .from('users')
+    .from('user_profiles')
     .update({ last_login_at: new Date().toISOString() })
-    .eq('id', authData.user.id);
+    .eq('user_id', authData.user.id);
 
   // Criar log de auditoria
   await createAuditLog({
@@ -85,7 +85,8 @@ export async function signup(data: SignupData): Promise<AuthSession> {
     password,
     options: {
       data: {
-        full_name: fullName
+        full_name: fullName,
+        email: email
       },
       emailRedirectTo: `${window.location.origin}/auth/confirm`
     }
@@ -99,38 +100,34 @@ export async function signup(data: SignupData): Promise<AuthSession> {
     throw new Error('Erro ao criar usuário');
   }
 
-  // Criar registro na tabela users
-  const { error: userError } = await supabase
-    .from('users')
-    .insert({
-      id: authData.user.id,
-      email,
-      full_name: fullName,
-      phone,
-      specialty,
-      crm,
-      crm_state: crmState,
-      email_confirmed: false,
-      terms_accepted: false,
-      privacy_accepted: false,
-      data_collection_consent: false
-    });
+  // O trigger handle_new_user() já cria o user_profile automaticamente
+  // Aguardar um pouco para o trigger executar
+  await new Promise(resolve => setTimeout(resolve, 1500));
 
-  if (userError) {
-    // Se falhar ao criar user, deletar do auth
-    await supabase.auth.admin.deleteUser(authData.user.id);
-    throw new Error(`Erro ao criar perfil: ${userError.message}`);
-  }
-
-  // Buscar dados completos
-  const { data: userData } = await supabase
-    .from('users')
+  // Buscar dados completos do user_profile
+  const { data: userData, error: userError } = await supabase
+    .from('user_profiles')
     .select('*')
-    .eq('id', authData.user.id)
+    .eq('user_id', authData.user.id)
     .single();
 
-  if (!userData) {
-    throw new Error('Erro ao buscar dados do usuário');
+  if (userError || !userData) {
+    throw new Error(`Erro ao buscar perfil: ${userError?.message || 'Perfil não encontrado'}`);
+  }
+
+  // Atualizar dados adicionais do perfil
+  const { error: updateError } = await supabase
+    .from('user_profiles')
+    .update({
+      crm,
+      crm_state: crmState,
+      specialty,
+      phone
+    })
+    .eq('user_id', authData.user.id);
+
+  if (updateError) {
+    console.warn('Erro ao atualizar dados adicionais:', updateError);
   }
 
   // Criar log de auditoria
@@ -240,9 +237,9 @@ export async function confirmEmail(confirmation: EmailConfirmation): Promise<voi
   
   if (user) {
     await supabase
-      .from('users')
+      .from('user_profiles')
       .update({ email_confirmed: true })
-      .eq('id', user.id);
+      .eq('user_id', user.id);
 
     await createAuditLog({
       userId: user.id,
@@ -283,9 +280,9 @@ export async function acceptLegalTerms(acceptance: LegalAcceptance): Promise<voi
   }
 
   const { error } = await supabase
-    .from('users')
+    .from('user_profiles')
     .update(updates)
-    .eq('id', user.id);
+    .eq('user_id', user.id);
 
   if (error) {
     throw new Error(`Erro ao aceitar termos: ${error.message}`);
@@ -312,9 +309,9 @@ export async function getCurrentSession(): Promise<AuthSession | null> {
   }
 
   const { data: userData } = await supabase
-    .from('users')
+    .from('user_profiles')
     .select('*')
-    .eq('id', session.user.id)
+    .eq('user_id', session.user.id)
     .single();
 
   if (!userData) {
@@ -340,7 +337,7 @@ export async function updateUserProfile(updates: Partial<User>): Promise<User> {
   }
 
   const { data, error } = await supabase
-    .from('users')
+    .from('user_profiles')
     .update({
       full_name: updates.fullName,
       phone: updates.phone,
@@ -349,7 +346,7 @@ export async function updateUserProfile(updates: Partial<User>): Promise<User> {
       crm_state: updates.crmState,
       avatar_url: updates.avatarUrl
     })
-    .eq('id', user.id)
+    .eq('user_id', user.id)
     .select()
     .single();
 
@@ -373,7 +370,7 @@ export async function updateUserProfile(updates: Partial<User>): Promise<User> {
  */
 function mapSupabaseUserToUser(data: any): User {
   return {
-    id: data.id,
+    id: data.user_id || data.id,
     email: data.email,
     fullName: data.full_name,
     avatarUrl: data.avatar_url,

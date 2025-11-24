@@ -216,8 +216,8 @@ export async function inviteMember(
 
   // Buscar usuário pelo email
   const { data: invitedUser } = await supabase
-    .from('users')
-    .select('id')
+    .from('user_profiles')
+    .select('user_id')
     .eq('email', inviteData.email)
     .single();
 
@@ -230,7 +230,7 @@ export async function inviteMember(
     .from('institution_members')
     .select('id')
     .eq('institution_id', institutionId)
-    .eq('user_id', invitedUser.id)
+    .eq('user_id', invitedUser.user_id)
     .single();
 
   if (existing) {
