@@ -96,6 +96,14 @@ export async function signup(data: SignupData): Promise<AuthSession> {
     throw new Error('Erro ao criar usuário');
   }
 
+  console.log('[SIGNUP DEBUG] Usuário criado no Auth:', authData.user.id);
+  console.log('[SIGNUP DEBUG] Email confirmado?', authData.user.email_confirmed_at);
+  console.log('[SIGNUP DEBUG] Session retornada?', !!authData.session);
+
+  // Aguardar 2 segundos para garantir que o usuário foi persistido
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  console.log('[SIGNUP DEBUG] Delay concluído, criando perfil...');
+
   // Criar perfil do usuário manualmente (não depender do trigger)
   let userData;
   const { data: insertData, error: insertError } = await supabase
@@ -115,6 +123,7 @@ export async function signup(data: SignupData): Promise<AuthSession> {
     .single();
 
   if (insertError) {
+    console.log('[SIGNUP DEBUG] Erro ao inserir perfil:', insertError);
     // Se o perfil já existe (trigger criou), buscar ao invés de inserir
     if (insertError.code === '23505') {
       const { data: existingUser, error: fetchError } = await supabase
