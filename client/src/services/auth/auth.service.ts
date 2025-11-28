@@ -190,6 +190,30 @@ export async function signup(data: SignupData): Promise<AuthSession> {
 }
 
 /**
+ * Atualiza senha do usuário
+ */
+export async function updatePassword(newPassword: string): Promise<void> {
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword
+  });
+
+  if (error) {
+    throw new Error(`Erro ao atualizar senha: ${error.message}`);
+  }
+
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  if (user) {
+    await createAuditLog({
+      userId: user.id,
+      action: 'password_updated',
+      resourceType: 'user',
+      resourceId: user.id
+    });
+  }
+}
+
+/**
  * Faz logout do usuário
  */
 export async function logout(): Promise<void> {
@@ -385,3 +409,17 @@ function mapSupabaseUserToUser(data: any): User {
     updatedAt: data.updated_at
   };
 }
+
+
+export const authService = {
+  login,
+  signup,
+  logout,
+  requestPasswordReset,
+  confirmPasswordReset,
+  confirmEmail,
+  acceptLegalTerms,
+  getCurrentSession,
+  updateUserProfile,
+  updatePassword
+};
