@@ -4,6 +4,9 @@ import { DocxGenerator } from '../lib/docx-generator';
 import { buscarRegrasAtivas, salvarFeedbackAudio, uploadAudio, buscarHistoricoRecente, type HistoricoRound } from '../lib/supabase';
 import mammoth from 'mammoth';
 import { Mic, MicOff, Upload, Download, History, BookOpen, Trash2, X } from 'lucide-react';
+import Header from '../components/Header/Header';
+import UserProfile from '../components/UserProfile/UserProfile';
+import APIConfig from '../components/APIConfig/APIConfig';
 
 export default function RoundCerebrasGemini() {
   // Estados de configuração
@@ -38,6 +41,10 @@ export default function RoundCerebrasGemini() {
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+
+  // Estados de modais
+  const [mostrarPerfil, setMostrarPerfil] = useState(false);
+  const [mostrarConfigAPIs, setMostrarConfigAPIs] = useState(false);
 
   // Carregar API Keys do localStorage (LIMPAR PRIMEIRO)
   useEffect(() => {
@@ -251,38 +258,11 @@ export default function RoundCerebrasGemini() {
         maxWidth: '900px',
         margin: '0 auto'
       }}>
-        {/* Header */}
-        <div style={{
-          textAlign: 'center',
-          marginBottom: '40px'
-        }}>
-          <img 
-            src="/logo.png" 
-            alt="Rounder" 
-            style={{
-              width: '120px',
-              height: '120px',
-              borderRadius: '24px',
-              marginBottom: '20px',
-              boxShadow: '0 8px 16px rgba(0,0,0,0.2)'
-            }}
-          />
-          <h1 style={{
-            fontSize: '32px',
-            fontWeight: 'bold',
-            color: '#2C3E50',
-            margin: '0 0 10px 0'
-          }}>
-            App Rounder
-          </h1>
-          <p style={{
-            fontSize: '16px',
-            color: '#2C3E50',
-            opacity: 0.8
-          }}>
-            Gerador Inteligente de Rounds Médicos
-          </p>
-        </div>
+        {/* Header com botões de perfil e APIs */}
+        <Header 
+          onProfileClick={() => setMostrarPerfil(true)}
+          onAPIConfigClick={() => setMostrarConfigAPIs(true)}
+        />
 
         {/* Card Principal */}
         <div style={{
@@ -292,158 +272,29 @@ export default function RoundCerebrasGemini() {
           boxShadow: '0 8px 32px rgba(0,0,0,0.1)',
           marginBottom: '20px'
         }}>
-          {/* API Keys */}
-          <div style={{ marginBottom: '32px' }}>
-            <h2 style={{
-              fontSize: '20px',
-              fontWeight: '600',
-              color: '#2C3E50',
-              marginBottom: '20px'
+          {/* Aviso sobre configuração de APIs */}
+          {(!cerebrasKey || !deepseekKey || !groqKey) && (
+            <div style={{
+              background: '#FFF3CD',
+              border: '1px solid #FFE69C',
+              borderRadius: '8px',
+              padding: '16px',
+              marginBottom: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
             }}>
-              🔑 API Keys (100% Gratuitas)
-            </h2>
-
-            {/* Cerebras */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#2C3E50',
-                marginBottom: '8px'
-              }}>
-                Cerebras API Key ✅
-              </label>
-              <input
-                type="password"
-                value={cerebrasKey}
-                onChange={(e) => salvarCerebrasKey(e.target.value)}
-                placeholder="Cole sua Cerebras API Key aqui..."
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  fontSize: '14px',
-                  border: '2px solid #E0E0E0',
-                  borderRadius: '8px',
-                  outline: 'none',
-                  transition: 'border-color 0.2s',
-                  fontFamily: 'monospace'
-                }}
-                onFocus={(e) => e.target.style.borderColor = '#5B9BD5'}
-                onBlur={(e) => e.target.style.borderColor = '#E0E0E0'}
-              />
-              <a 
-                href="https://cerebras.ai" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                style={{
-                  fontSize: '12px',
-                  color: '#5B9BD5',
-                  textDecoration: 'none',
-                  marginTop: '4px',
-                  display: 'inline-block'
-                }}
-              >
-                Obter em: cerebras.ai (gratuito)
-              </a>
+              <span style={{ fontSize: '24px' }}>⚠️</span>
+              <div>
+                <p style={{ margin: '0 0 4px 0', fontWeight: '600', color: '#856404' }}>
+                  Configure suas API Keys
+                </p>
+                <p style={{ margin: 0, fontSize: '14px', color: '#856404' }}>
+                  Clique no botão "🔑 APIs" no topo da página para configurar suas chaves de API gratuitas.
+                </p>
+              </div>
             </div>
-
-            {/* DeepSeek */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#2C3E50',
-                marginBottom: '8px'
-              }}>
-                DeepSeek API Key ✅
-              </label>
-              <input
-                type="password"
-                value={deepseekKey}
-                onChange={(e) => salvarDeepSeekKey(e.target.value)}
-                placeholder="Cole sua DeepSeek API Key aqui..."
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  fontSize: '14px',
-                  border: '2px solid #E0E0E0',
-                  borderRadius: '8px',
-                  outline: 'none',
-                  transition: 'border-color 0.2s',
-                  fontFamily: 'monospace'
-                }}
-                onFocus={(e) => e.target.style.borderColor = '#5B9BD5'}
-                onBlur={(e) => e.target.style.borderColor = '#E0E0E0'}
-              />
-              <a 
-                href="https://platform.deepseek.com/api_keys" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                style={{
-                  fontSize: '12px',
-                  color: '#5B9BD5',
-                  textDecoration: 'none',
-                  marginTop: '4px',
-                  display: 'inline-block'
-                }}
-              >
-                Obter em: platform.deepseek.com (gratuito)
-              </a>
-            </div>
-
-            {/* Groq */}
-            <div style={{ marginBottom: '0' }}>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#2C3E50',
-                marginBottom: '8px'
-              }}>
-                Groq API Key ✅
-              </label>
-              <input
-                type="password"
-                value={groqKey}
-                onChange={(e) => salvarGroqKey(e.target.value)}
-                placeholder="Cole sua Groq API Key aqui..."
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  fontSize: '14px',
-                  border: '2px solid #E0E0E0',
-                  borderRadius: '8px',
-                  outline: 'none',
-                  transition: 'border-color 0.2s',
-                  fontFamily: 'monospace'
-                }}
-                onFocus={(e) => e.target.style.borderColor = '#5B9BD5'}
-                onBlur={(e) => e.target.style.borderColor = '#E0E0E0'}
-              />
-              <a 
-                href="https://console.groq.com/keys" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                style={{
-                  fontSize: '12px',
-                  color: '#5B9BD5',
-                  textDecoration: 'none',
-                  marginTop: '4px',
-                  display: 'inline-block'
-                }}
-              >
-                Obter em: console.groq.com/keys (gratuito)
-              </a>
-            </div>
-          </div>
-
-          <div style={{
-            height: '1px',
-            background: '#E0E0E0',
-            margin: '32px 0'
-          }} />
+          )}
 
           {/* Upload de Documentos */}
           <div style={{ marginBottom: '32px' }}>
@@ -912,6 +763,16 @@ export default function RoundCerebrasGemini() {
           </p>
         </div>
       </div>
+
+      {/* Modal de Perfil */}
+      {mostrarPerfil && (
+        <UserProfile onClose={() => setMostrarPerfil(false)} />
+      )}
+
+      {/* Modal de Configuração de APIs */}
+      {mostrarConfigAPIs && (
+        <APIConfig onClose={() => setMostrarConfigAPIs(false)} />
+      )}
     </div>
   );
 }

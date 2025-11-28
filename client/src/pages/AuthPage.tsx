@@ -5,18 +5,19 @@
 
 import { useState } from 'react';
 import { Eye, EyeOff, Mail, Lock, User, Phone, FileText } from 'lucide-react';
-import { login, signup } from '@/services/auth/auth.service';
+import { login, signup, requestPasswordReset } from '@/services/auth/auth.service';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
 
 export default function AuthPage() {
   const [, setLocation] = useLocation();
   const { setSession } = useAuth();
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [resetEmailSent, setResetEmailSent] = useState(false);
 
   // Campos do formulário
   const [email, setEmail] = useState('');
@@ -37,7 +38,7 @@ export default function AuthPage() {
         const session = await login({ email, password, rememberMe });
         setSession(session);
         setLocation('/');
-      } else {
+      } else if (mode === 'signup') {
         const session = await signup({
           email,
           password,
@@ -49,6 +50,9 @@ export default function AuthPage() {
         });
         setSession(session);
         setLocation('/');
+      } else if (mode === 'reset') {
+        await requestPasswordReset({ email });
+        setResetEmailSent(true);
       }
     } catch (err: any) {
       setError(err.message || 'Erro ao processar. Tente novamente.');
@@ -81,28 +85,42 @@ export default function AuthPage() {
         {/* Card de autenticação */}
         <div className="bg-white rounded-3xl shadow-2xl p-6 sm:p-8">
           {/* Tabs Login/Cadastro */}
-          <div className="flex gap-2 mb-6">
-            <button
-              onClick={() => setMode('login')}
-              className={`flex-1 py-3 px-4 rounded-2xl font-semibold transition-all ${
-                mode === 'login'
-                  ? 'bg-[#5B9BD5] text-white shadow-lg'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              Entrar
-            </button>
-            <button
-              onClick={() => setMode('signup')}
-              className={`flex-1 py-3 px-4 rounded-2xl font-semibold transition-all ${
-                mode === 'signup'
-                  ? 'bg-[#4A90E2] text-white shadow-lg'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          {mode !== 'reset' ? (
+            <div className="flex gap-2 mb-6">
+              <button
+                onClick={() => setMode('login')}
+                className={`flex-1 py-3 px-4 rounded-2xl font-semibold transition-all ${
+                  mode === 'login'
+                    ? 'bg-[#5B9BD5] text-white shadow-lg'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Entrar
+              </button>
+              <button
+                onClick={() => setMode('signup')}
+                className={`flex-1 py-3 px-4 rounded-2xl font-semibold transition-all ${
+                  mode === 'signup'
+                    ? 'bg-[#4A90E2] text-white shadow-lg'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
               Criar Conta
             </button>
           </div>
+          ) : (
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold text-[#2C3E50] mb-2">Recuperar Senha</h2>
+              <p className="text-sm text-gray-600">Digite seu email para receber o link de recuperação</p>
+            </div>
+          )}
+
+          {/* Mensagem de sucesso (reset) */}
+          {resetEmailSent && (
+            <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-2xl text-green-700 text-sm">
+              ✅ Email enviado! Verifique sua caixa de entrada e spam.
+            </div>
+          )}
 
           {/* Mensagem de erro */}
           {error && (
@@ -210,7 +228,8 @@ export default function AuthPage() {
               </>
             )}
 
-            {/* Senha */}
+            {/* Senha (não mostrar em reset) */}
+            {mode !== 'reset' && (
             <div>
               <label className="block text-sm font-semibold text-[#2C3E50] mb-2">
                 Senha
@@ -235,6 +254,7 @@ export default function AuthPage() {
                 </button>
               </div>
             </div>
+            )}
 
             {/* Lembrar-me (apenas login) */}
             {mode === 'login' && (
@@ -250,6 +270,7 @@ export default function AuthPage() {
                 </label>
                 <button
                   type="button"
+                  onClick={() => setMode('reset')}
                   className="text-sm text-[#5B9BD5] hover:text-[#4A90E2] font-semibold"
                 >
                   Esqueci a senha
@@ -288,10 +309,27 @@ export default function AuthPage() {
                 </span>
               ) : mode === 'login' ? (
                 'Entrar'
-              ) : (
+              ) : mode === 'signup' ? (
                 'Criar Conta'
+              ) : (
+                'Enviar Link de Recuperação'
               )}
             </button>
+
+            {/* Botão de voltar (apenas reset) */}
+            {mode === 'reset' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  setResetEmailSent(false);
+                  setError('');
+                }}
+                className="w-full mt-3 py-3 rounded-2xl font-semibold text-[#5B9BD5] bg-gray-100 hover:bg-gray-200 transition-all"
+              >
+                Voltar ao Login
+              </button>
+            )}
           </form>
         </div>
 
