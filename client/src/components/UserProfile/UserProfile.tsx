@@ -319,3 +319,5 @@ export const UserProfile: React.FC<UserProfileProps> = ({ onClose }) => {
     </div>
   );
 };
+
+export default UserProfile;

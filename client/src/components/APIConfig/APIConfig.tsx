@@ -241,3 +241,5 @@ export const APIConfig: React.FC<APIConfigProps> = ({ onClose }) => {
     </div>
   );
 };
+
+export default APIConfig;
