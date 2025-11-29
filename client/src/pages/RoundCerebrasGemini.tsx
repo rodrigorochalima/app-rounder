@@ -7,6 +7,7 @@ import { Mic, MicOff, Upload, Download, History, BookOpen, Trash2, X } from 'luc
 import Header from '../components/Header/Header';
 import UserProfile from '../components/UserProfile/UserProfile';
 import APIConfig from '../components/APIConfig/APIConfig';
+import RulesPanel from '../components/RulesPanel/RulesPanel';
 
 export default function RoundCerebrasGemini() {
   // Estados de configuração
@@ -45,6 +46,7 @@ export default function RoundCerebrasGemini() {
   // Estados de modais
   const [mostrarPerfil, setMostrarPerfil] = useState(false);
   const [mostrarConfigAPIs, setMostrarConfigAPIs] = useState(false);
+  const [mostrarRegras, setMostrarRegras] = useState(false);
 
   // Carregar API Keys do localStorage (LIMPAR PRIMEIRO)
   useEffect(() => {

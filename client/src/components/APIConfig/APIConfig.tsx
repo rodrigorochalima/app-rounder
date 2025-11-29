@@ -13,6 +13,14 @@ interface APIProvider {
 
 const API_PROVIDERS: APIProvider[] = [
   {
+    id: 'qwen',
+    name: 'Alibaba Qwen',
+    description: 'Maior limite gratuito - Modelo avançado da Alibaba Cloud',
+    icon: '🚀',
+    freeUrl: 'https://dashscope.aliyun.com (gratuito)',
+    requiresKey: true
+  },
+  {
     id: 'cerebras',
     name: 'Cerebras',
     description: 'API de IA ultra-rápida para geração de texto médico',

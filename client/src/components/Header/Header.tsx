@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { authService } from '@/services/auth';
 import { UserProfile } from '../UserProfile/UserProfile';
 import { APIConfig } from '../APIConfig/APIConfig';
+import { RulesPanel } from '../RulesPanel/RulesPanel';
 import './Header.css';
 
 export const Header: React.FC = () => {
   const [showProfile, setShowProfile] = useState(false);
   const [showAPIConfig, setShowAPIConfig] = useState(false);
+  const [showRules, setShowRules] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,6 +45,14 @@ export const Header: React.FC = () => {
             </button>
 
             <button 
+              className="header-btn btn-rules"
+              onClick={() => setShowRules(true)}
+              title="Gerenciar Regras"
+            >
+              📝 Regras
+            </button>
+
+            <button 
               className="header-btn btn-profile"
               onClick={() => setShowProfile(true)}
               title="Meu Perfil"
@@ -58,6 +68,7 @@ export const Header: React.FC = () => {
 
       {showProfile && <UserProfile onClose={() => setShowProfile(false)} />}
       {showAPIConfig && <APIConfig onClose={() => setShowAPIConfig(false)} />}
+      {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
     </>
   );
 };
