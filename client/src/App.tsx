@@ -14,6 +14,7 @@ import RoundCerebrasGemini from "./pages/RoundCerebrasGemini";
 import AdminPanel from "./pages/AdminPanel";
 import AuthCallbackPage from "./pages/AuthCallbackPage";
 import AuthPage from "./pages/AuthPage";
+import ResetPassword from "./pages/ResetPassword";
 import APIKeysPage from "./pages/APIKeysPage";
 
 function Router() {
@@ -23,6 +24,7 @@ function Router() {
     <Switch>
       <Route path={"/"} component={RoundCerebrasGemini} />
       <Route path={"/auth"} component={AuthPage} />
+      <Route path={"/auth/reset-password"} component={ResetPassword} />
       <Route path={"/api-keys"} component={APIKeysPage} />
       <Route path="/admin" component={AdminPanel} />
       <Route path="/auth/callback" component={AuthCallbackPage} />
