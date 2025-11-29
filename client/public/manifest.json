@@ -1,0 +1,53 @@
+{
+  "name": "App Rounder - Gerador de Rounds Médicos",
+  "short_name": "Rounder",
+  "description": "Gerador inteligente de rounds médicos com IA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#667eea",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["medical", "productivity", "health"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Novo Round",
+      "short_name": "Novo",
+      "description": "Criar novo round médico",
+      "url": "/?action=new",
+      "icons": [
+        {
+          "src": "/logo.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Histórico",
+      "short_name": "Histórico",
+      "description": "Ver rounds anteriores",
+      "url": "/?action=history",
+      "icons": [
+        {
+          "src": "/logo.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false
+}

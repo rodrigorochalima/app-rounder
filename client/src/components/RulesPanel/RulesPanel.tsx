@@ -208,6 +208,12 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
         return;
       }
 
+      // Verificar limite de 40 regras
+      if (rules.length >= 40) {
+        alert('Limite de 40 regras atingido! Para adicionar mais, entre em contato com o suporte.');
+        return;
+      }
+
       const session = await authService.getCurrentSession();
       if (!session?.user) {
         throw new Error('Usuário não autenticado');
@@ -306,6 +312,9 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
             </span>
             <span className="rules-stat">
               <strong>{activeRulesCount}</strong> ativas
+            </span>
+            <span className="rules-stat" style={{ color: rules.length >= 40 ? '#c33' : '#666' }}>
+              <strong>{40 - rules.length}</strong> restantes (limite: 40)
             </span>
           </div>
         </div>
