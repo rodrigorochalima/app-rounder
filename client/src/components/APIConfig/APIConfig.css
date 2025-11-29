@@ -312,3 +312,208 @@ input:checked + .toggle-slider:before {
     width: 100%;
   }
 }
+
+/* Botão de informação */
+.info-button {
+  background: #667eea;
+  color: white;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.info-button:hover {
+  background: #5568d3;
+  transform: scale(1.1);
+}
+
+/* Actions do card */
+.api-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.api-info {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+}
+
+.api-icon {
+  font-size: 32px;
+}
+
+.api-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Badges */
+.free-badge, .paid-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.free-badge {
+  background: #d4edda;
+  color: #155724;
+}
+
+.paid-badge {
+  background: #fff3cd;
+  color: #856404;
+}
+
+/* Botão de obter chave */
+.get-key-button {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.get-key-button:hover {
+  background: #5568d3;
+}
+
+/* Modal de tutorial */
+.tutorial-modal {
+  max-width: 600px !important;
+}
+
+.tutorial-content {
+  padding: 20px 40px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.tutorial-step {
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  background: #f8f9fa;
+  border-left: 4px solid #667eea;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.tutorial-step:last-child {
+  background: #d4edda;
+  border-left-color: #28a745;
+  font-weight: 600;
+}
+
+/* Grid de APIs */
+.api-grid {
+  padding: 20px 40px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 16px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.api-card {
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 16px;
+  background: white;
+  transition: all 0.3s;
+}
+
+.api-card.selected {
+  border-color: #667eea;
+  background: #f0f3ff;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+}
+
+.api-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Botões do footer */
+.cancel-button, .save-button, .primary-button, .secondary-button {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cancel-button, .secondary-button {
+  background: #e0e0e0;
+  color: #666;
+}
+
+.cancel-button:hover, .secondary-button:hover {
+  background: #d0d0d0;
+}
+
+.save-button, .primary-button {
+  background: #667eea;
+  color: white;
+}
+
+.save-button:hover, .primary-button:hover {
+  background: #5568d3;
+  transform: translateY(-1px);
+}
+
+.save-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Descrição do modal */
+.modal-description {
+  padding: 0 40px 20px;
+  color: #666;
+  font-size: 14px;
+  margin: 0;
+}
+
+/* Responsivo */
+@media (max-width: 768px) {
+  .api-grid {
+    grid-template-columns: 1fr;
+    padding: 20px;
+  }
+
+  .tutorial-content {
+    padding: 20px;
+  }
+
+  .modal-description {
+    padding: 0 20px 20px;
+  }
+
+  .modal-footer {
+    flex-direction: column;
+  }
+
+  .cancel-button, .save-button, .primary-button, .secondary-button {
+    width: 100%;
+  }
+}
