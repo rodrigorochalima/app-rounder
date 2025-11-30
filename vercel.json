@@ -1,7 +1,7 @@
 {
   "version": 2,
   "buildCommand": "cd client && pnpm run build",
-  "outputDirectory": "dist/public",
+  "outputDirectory": "client/dist",
   "devCommand": "cd client && pnpm run dev",
   "installCommand": "pnpm install",
   "framework": null,
@@ -12,7 +12,15 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=0, must-revalidate"
+          "value": "no-cache, no-store, must-revalidate"
+        },
+        {
+          "key": "Pragma",
+          "value": "no-cache"
+        },
+        {
+          "key": "Expires",
+          "value": "0"
         }
       ]
     },
