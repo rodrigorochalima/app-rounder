@@ -166,7 +166,6 @@ export const SIGLAS_UTI = {
   // Respiratório
   'FR': 'Frequência Respiratória',
   'VC': 'Volume Corrente',
-  'VM': 'Volume Minuto',
   'Pplatô': 'Pressão de Platô',
   'Ppico': 'Pressão de Pico',
   'Compl': 'Complacência',
@@ -228,7 +227,7 @@ export const SIGLAS_UTI = {
   'Glasgow': 'Escala de Coma de Glasgow',
   
   // Outros
-  'PCR': 'Parada Cardiorrespiratória',
+  'PCR_PARADA': 'Parada Cardiorrespiratória',
   'RCP': 'Ressuscitação Cardiopulmonar',
   'SARA': 'Síndrome da Angústia Respiratória Aguda',
   'SDRA': 'Síndrome do Desconforto Respiratório Agudo',

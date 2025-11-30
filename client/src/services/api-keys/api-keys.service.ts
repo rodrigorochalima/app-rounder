@@ -68,7 +68,7 @@ export async function getDefaultAPIKeyForProvider(
   institutionId: string,
   provider: AIProvider
 ): Promise<DecryptedAPIKey | null> {
-  const { data, error } = await supabase
+  const { data: defaultData, error } = await supabase
     .from('api_keys')
     .select('*')
     .eq('institution_id', institutionId)
@@ -77,6 +77,8 @@ export async function getDefaultAPIKeyForProvider(
     .eq('is_default', true)
     .single();
 
+  let data = defaultData;
+  
   if (error || !data) {
     // Se não tem default, pega a primeira ativa
     const { data: firstActive } = await supabase
