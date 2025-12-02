@@ -348,7 +348,6 @@ export const CORRECOES_COMUNS: Record<string, string> = {
   // Siglas
   'IOT': 'Intubação Orotraqueal',
   'TQT': 'Traqueostomia',
-  'VM': 'Ventilação Mecânica',
   'DVA': 'Droga Vasoativa',
   
   // Outros
