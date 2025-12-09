@@ -46,7 +46,6 @@ export default function RoundCerebrasGemini() {
   // Estados de modais
   const [mostrarPerfil, setMostrarPerfil] = useState(false);
   const [mostrarConfigAPIs, setMostrarConfigAPIs] = useState(false);
-  const [mostrarRegras, setMostrarRegras] = useState(false);
 
   // Carregar API Keys do localStorage (LIMPAR PRIMEIRO)
   useEffect(() => {
