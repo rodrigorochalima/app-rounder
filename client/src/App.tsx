@@ -16,23 +16,59 @@ import AuthCallbackPage from "./pages/AuthCallbackPage";
 import AuthPage from "./pages/AuthPage";
 import ResetPassword from "./pages/ResetPassword";
 import APIKeysPage from "./pages/APIKeysPage";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 function Router() {
   const base = import.meta.env.BASE_URL;
   return (
     <WouterRouter base={base}>
     <Switch>
-      <Route path={"/"} component={RoundCerebrasGemini} />
+      {/* Rotas públicas (sem proteção) */}
       <Route path={"/auth"} component={AuthPage} />
       <Route path={"/auth/reset-password"} component={ResetPassword} />
-      <Route path={"/api-keys"} component={APIKeysPage} />
-      <Route path="/admin" component={AdminPanel} />
       <Route path="/auth/callback" component={AuthCallbackPage} />
-      <Route path={"/openai"} component={RoundOpenAI} />
-      <Route path={"/paste"} component={RoundGroqPaste} />
-      <Route path={"/upload"} component={RoundGroq} />
-      <Route path={"/gemini"} component={RoundGemini} />
-      <Route path={"/whatsapp"} component={Home} />
+      
+      {/* Rotas protegidas (requerem autenticação) */}
+      <Route path={""} component={() => (
+        <ProtectedRoute>
+          <RoundCerebrasGemini />
+        </ProtectedRoute>
+      )} />
+      <Route path={"/api-keys"} component={() => (
+        <ProtectedRoute>
+          <APIKeysPage />
+        </ProtectedRoute>
+      )} />
+      <Route path="/admin" component={() => (
+        <ProtectedRoute>
+          <AdminPanel />
+        </ProtectedRoute>
+      )} />
+      <Route path={"/openai"} component={() => (
+        <ProtectedRoute>
+          <RoundOpenAI />
+        </ProtectedRoute>
+      )} />
+      <Route path={"/paste"} component={() => (
+        <ProtectedRoute>
+          <RoundGroqPaste />
+        </ProtectedRoute>
+      )} />
+      <Route path={"/upload"} component={() => (
+        <ProtectedRoute>
+          <RoundGroq />
+        </ProtectedRoute>
+      )} />
+      <Route path={"/gemini"} component={() => (
+        <ProtectedRoute>
+          <RoundGemini />
+        </ProtectedRoute>
+      )} />
+      <Route path={"/whatsapp"} component={() => (
+        <ProtectedRoute>
+          <Home />
+        </ProtectedRoute>
+      )} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
