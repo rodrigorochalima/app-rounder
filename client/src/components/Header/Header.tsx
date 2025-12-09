@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { authService } from '@/services/auth';
 import { UserProfile } from '../UserProfile/UserProfile';
 import { APIConfig } from '../APIConfig/APIConfig';
+import APIManager from '../APIManager/APIManager';
 import { RulesPanel } from '../RulesPanel/RulesPanel';
 import './Header.css';
 
 export const Header: React.FC = () => {
   const [showProfile, setShowProfile] = useState(false);
   const [showAPIConfig, setShowAPIConfig] = useState(false);
+  const [showAPIManager, setShowAPIManager] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
 
@@ -38,10 +40,10 @@ export const Header: React.FC = () => {
           <div className="header-actions">
             <button 
               className="header-btn btn-api-config"
-              onClick={() => setShowAPIConfig(true)}
-              title="Configurar APIs"
+              onClick={() => setShowAPIManager(true)}
+              title="Gerenciar APIs"
             >
-              🔑 APIs
+              🔑 Gerenciar APIs
             </button>
 
             <button 
@@ -68,6 +70,7 @@ export const Header: React.FC = () => {
 
       {showProfile && <UserProfile onClose={() => setShowProfile(false)} />}
       {showAPIConfig && <APIConfig onClose={() => setShowAPIConfig(false)} />}
+      {showAPIManager && <APIManager onClose={() => setShowAPIManager(false)} />}
       {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
     </>
   );

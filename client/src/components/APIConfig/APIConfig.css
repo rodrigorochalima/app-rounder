@@ -517,3 +517,160 @@ input:checked + .toggle-slider:before {
     width: 100%;
   }
 }
+
+/* iPhone Específico - Correções Completas */
+@media (max-width: 480px) {
+  /* Remover padding do overlay */
+  .modal-overlay {
+    padding: 0;
+  }
+
+  /* Modal fullscreen no iPhone */
+  .api-config-modal,
+  .modal-content {
+    padding: 0;
+    margin: 0;
+    width: 100vw;
+    height: 100vh;
+    max-width: 100vw;
+    max-height: 100vh;
+  }
+
+  .api-config-content {
+    border-radius: 0;
+    max-height: 100vh;
+    height: 100vh;
+    width: 100vw;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Header compacto */
+  .api-config-header {
+    padding: 16px;
+  }
+
+  .api-config-header h2 {
+    font-size: 20px;
+  }
+
+  .api-config-header p {
+    font-size: 13px;
+  }
+
+  /* Grid 1 coluna */
+  .api-grid {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+
+  /* Cards menores */
+  .api-card {
+    padding: 14px;
+  }
+
+  .provider-icon, .api-icon {
+    font-size: 28px;
+  }
+
+  .provider-info h3 {
+    font-size: 16px;
+  }
+
+  .provider-info p {
+    font-size: 12px;
+  }
+
+  /* Botão info menor */
+  .info-button {
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+  }
+
+  /* Footer compacto */
+  .api-config-footer {
+    padding: 16px;
+  }
+
+  /* Modal de tutorial fullscreen */
+  .tutorial-modal {
+    padding: 0;
+  }
+
+  .tutorial-content {
+    border-radius: 0;
+    max-height: 100vh;
+    height: 100vh;
+    width: 100vw;
+    padding: 16px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tutorial-header {
+    padding: 16px;
+  }
+
+  .tutorial-header h3 {
+    font-size: 18px;
+    margin: 0;
+    padding-right: 40px;
+    word-wrap: break-word;
+  }
+
+  .tutorial-step {
+    font-size: 13px;
+    padding: 10px 12px;
+  }
+
+  /* Z-index garantido */
+  .tutorial-modal {
+    z-index: 10001 !important;
+  }
+
+  .api-config-modal {
+    z-index: 10000 !important;
+  }
+
+  /* Touch targets mínimos */
+  .close-button,
+  .info-button,
+  .toggle-switch {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Inputs maiores para touch */
+  .api-key-input input {
+    padding: 12px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .api-key-input label {
+    font-size: 13px;
+    word-wrap: break-word;
+  }
+
+  /* Evitar texto cortado */
+  .modal-description,
+  .provider-info p,
+  .tutorial-step {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+  }
+
+  /* Botões maiores */
+  .btn-cancel,
+  .btn-save,
+  .cancel-button,
+  .save-button,
+  .primary-button,
+  .secondary-button {
+    padding: 14px 20px;
+    font-size: 15px;
+  }
+}
