@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { authService } from '@/services/auth';
-import { UserProfile } from '../UserProfile/UserProfile';
+import { ProfilePanel } from '../ProfilePanel/ProfilePanel';
 import { APIConfig } from '../APIConfig/APIConfig';
 import APIManager from '../APIManager/APIManager';
 import { RulesPanel } from '../RulesPanel/RulesPanel';
@@ -33,19 +33,20 @@ export const Header: React.FC = () => {
       <header className="app-header">
         <div className="header-content">
           <div className="header-logo">
-            <h1>🩺 Rounder</h1>
-            <span className="header-subtitle">Gerador Inteligente de Rounds Médicos</span>
+            <div className="header-logo-container">
+              <img 
+                src="/rounder-icon.png" 
+                alt="Rounder" 
+                className="header-logo-icon"
+              />
+              <div className="header-logo-text">
+                <h1>Rounder</h1>
+                <span className="header-subtitle">Gerador Inteligente de Rounds Médicos</span>
+              </div>
+            </div>
           </div>
 
           <div className="header-actions">
-            <button 
-              className="header-btn btn-api-config"
-              onClick={() => setShowAPIManager(true)}
-              title="Gerenciar APIs"
-            >
-              🔑 Gerenciar APIs
-            </button>
-
             <button 
               className="header-btn btn-rules"
               onClick={() => setShowRules(true)}
@@ -68,7 +69,7 @@ export const Header: React.FC = () => {
         </div>
       </header>
 
-      {showProfile && <UserProfile onClose={() => setShowProfile(false)} />}
+      {showProfile && <ProfilePanel onClose={() => setShowProfile(false)} />}
       {showAPIConfig && <APIConfig onClose={() => setShowAPIConfig(false)} />}
       {showAPIManager && <APIManager onClose={() => setShowAPIManager(false)} />}
       {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
