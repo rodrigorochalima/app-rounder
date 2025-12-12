@@ -33,6 +33,10 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
   const [institution, setInstitution] = useState('');
   const [phone, setPhone] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
+  const [hospitalName, setHospitalName] = useState('');
+  const [hospitalPhone, setHospitalPhone] = useState('');
+  const [position, setPosition] = useState('');
+  const [personalPhone, setPersonalPhone] = useState('');
 
   // Segurança
   const [currentPassword, setCurrentPassword] = useState('');
@@ -58,6 +62,10 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
         setInstitution(session.user.institution || '');
         setPhone(session.user.phone || '');
         setLogoUrl(session.user.logoUrl || '');
+        setHospitalName(session.user.hospitalName || '');
+        setHospitalPhone(session.user.hospitalPhone || '');
+        setPosition(session.user.position || '');
+        setPersonalPhone(session.user.personalPhone || '');
       }
     } catch (err) {
       console.error('Erro ao carregar dados:', err);
@@ -71,13 +79,17 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
     setSuccess('');
 
     try {
-      await authService.updateProfile({
+      await authService.updateUserProfile({
         fullName,
         specialty,
         crm,
         crmState,
         institution,
-        phone
+        phone,
+        hospitalName,
+        hospitalPhone,
+        position,
+        personalPhone
       });
       setSuccess('Dados salvos com sucesso!');
       setTimeout(() => setSuccess(''), 3000);
@@ -300,12 +312,47 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
 
               {/* Telefone */}
               <div className="profile-panel-field">
-                <label>Telefone</label>
+                <label>Telefone Pessoal</label>
                 <input
                   type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  value={personalPhone}
+                  onChange={(e) => setPersonalPhone(e.target.value)}
                   placeholder="(11) 99999-9999"
+                />
+              </div>
+
+              {/* Cargo */}
+              <div className="profile-panel-field">
+                <label>Cargo/Função</label>
+                <input
+                  type="text"
+                  value={position}
+                  onChange={(e) => setPosition(e.target.value)}
+                  placeholder="Médico Residente, Preceptor, etc."
+                />
+              </div>
+
+              <h4 style={{ marginTop: '24px', marginBottom: '16px', fontSize: '16px', fontWeight: 600 }}>Dados do Hospital</h4>
+
+              {/* Nome do Hospital */}
+              <div className="profile-panel-field">
+                <label>Nome do Hospital</label>
+                <input
+                  type="text"
+                  value={hospitalName}
+                  onChange={(e) => setHospitalName(e.target.value)}
+                  placeholder="Hospital das Clínicas"
+                />
+              </div>
+
+              {/* Telefone do Hospital */}
+              <div className="profile-panel-field">
+                <label>Telefone do Hospital</label>
+                <input
+                  type="tel"
+                  value={hospitalPhone}
+                  onChange={(e) => setHospitalPhone(e.target.value)}
+                  placeholder="(11) 3333-3333"
                 />
               </div>
 

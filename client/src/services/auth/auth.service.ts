@@ -369,7 +369,11 @@ export async function updateUserProfile(updates: Partial<User>): Promise<User> {
       specialty: updates.specialty,
       crm: updates.crm,
       crm_state: updates.crmState,
-      avatar_url: updates.avatarUrl
+      avatar_url: updates.avatarUrl,
+      hospital_name: updates.hospitalName,
+      hospital_phone: updates.hospitalPhone,
+      position: updates.position,
+      personal_phone: updates.personalPhone
     })
     .eq('user_id', user.id)
     .select()
@@ -403,6 +407,10 @@ function mapSupabaseUserToUser(data: any): User {
     specialty: data.specialty,
     crm: data.crm,
     crmState: data.crm_state,
+    hospitalName: data.hospital_name,
+    hospitalPhone: data.hospital_phone,
+    position: data.position,
+    personalPhone: data.personal_phone,
     role: data.role || 'rotineiro',
     onboardingCompleted: data.onboarding_completed || false,
     createdAt: data.created_at,

@@ -11,6 +11,11 @@ export interface User {
   specialty?: string;
   crm?: string;
   crmState?: string;
+  hospitalName?: string;
+  hospitalPhone?: string;
+  position?: string;
+  personalPhone?: string;
+  logoUrl?: string;
   role: string;
   onboardingCompleted: boolean;
   createdAt: string;
