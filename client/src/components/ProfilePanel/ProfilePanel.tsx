@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { authService } from '@/services/auth';
 import APIManager from '../APIManager/APIManager';
+import { TemplateEditor, TemplateData } from '../TemplateEditor/TemplateEditor';
 import './ProfilePanel.css';
 
 interface ProfilePanelProps {
@@ -127,6 +128,23 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
       setError(err.message || 'Erro ao alterar senha');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveTemplate = async (templateData: TemplateData) => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      // TODO: Salvar template no Supabase
+      console.log('Template salvo:', templateData);
+      setSuccess('Template salvo com sucesso!');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao salvar template');
     } finally {
       setLoading(false);
     }
@@ -450,11 +468,7 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
           {/* Aba: Templates */}
           {activeTab === 'templates' && (
             <div className="profile-panel-templates">
-              <h3>Templates de Impressão</h3>
-              <p className="profile-panel-placeholder">
-                🚧 Em desenvolvimento<br />
-                Aqui você poderá criar e gerenciar templates personalizados para impressão de rounds.
-              </p>
+              <TemplateEditor onSave={handleSaveTemplate} />
             </div>
           )}
 
