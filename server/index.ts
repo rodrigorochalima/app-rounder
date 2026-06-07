@@ -11,6 +11,10 @@ import { readFileSync } from 'fs';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool, query } from './db.js';
+import { Resend } from 'resend';
+
+const resend = new Resend(process.env.RESEND_API_KEY || '');
+const APP_URL = process.env.APP_URL || 'https://app-rounder.vercel.app';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,6 +75,13 @@ function generateRefreshToken(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let token = '';
   for (let i = 0; i < 64; i++) token += chars.charAt(Math.floor(Math.random() * chars.length));
+  return token;
+}
+
+function generateResetToken(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let token = '';
+  for (let i = 0; i < 96; i++) token += chars.charAt(Math.floor(Math.random() * chars.length));
   return token;
 }
 
@@ -203,8 +214,99 @@ app.get('/api/auth/me', authenticateToken, async (req: any, res: any) => {
   }
 });
 
-app.post('/api/auth/reset-password', async (_req: any, res: any) => {
-  return res.json({ message: 'Se o email existir, você receberá instruções em breve' });
+// Solicitar reset de senha — envia e-mail real via Resend
+app.post('/api/auth/reset-password', async (req: any, res: any) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email é obrigatório' });
+
+    // Sempre retorna sucesso (segurança: não revelar se e-mail existe)
+    const userResult = await query('SELECT id, email FROM users WHERE email = $1', [email.toLowerCase()]);
+    if (userResult.rows.length === 0) {
+      return res.json({ message: 'Se o email existir, você receberá instruções em breve' });
+    }
+
+    const user = userResult.rows[0];
+
+    // Invalidar tokens anteriores do usuário
+    await query('UPDATE password_reset_tokens SET used = true WHERE user_id = $1 AND used = false', [user.id]);
+
+    // Gerar novo token com validade de 1 hora
+    const resetToken = generateResetToken();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+    await query(
+      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+      [user.id, resetToken, expiresAt.toISOString()]
+    );
+
+    const resetLink = `${APP_URL}/auth/reset-password?token=${resetToken}`;
+
+    // Enviar e-mail via Resend
+    await resend.emails.send({
+      from: 'App Rounder <noreply@nexo.center>',
+      to: [user.email],
+      subject: '🔑 Redefinição de senha — App Rounder',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #4A90D9, #357ABD); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">🏥 App Rounder</h1>
+            <p style="color: rgba(255,255,255,0.85); margin: 8px 0 0;">Gerador Inteligente de Rounds Médicos</p>
+          </div>
+          <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 12px 12px; border: 1px solid #e0e0e0;">
+            <h2 style="color: #333; margin-top: 0;">Redefinição de senha</h2>
+            <p style="color: #555; line-height: 1.6;">Recebemos uma solicitação para redefinir a senha da sua conta no App Rounder.</p>
+            <p style="color: #555; line-height: 1.6;">Clique no botão abaixo para criar uma nova senha. Este link é válido por <strong>1 hora</strong>.</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${resetLink}" style="background: #4A90D9; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-size: 16px; font-weight: bold; display: inline-block;">Redefinir minha senha</a>
+            </div>
+            <p style="color: #888; font-size: 13px;">Se você não solicitou a redefinição de senha, ignore este e-mail. Sua senha permanece a mesma.</p>
+            <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+            <p style="color: #aaa; font-size: 12px; text-align: center;">App Rounder • Nexo Soluções Digitais</p>
+          </div>
+        </div>
+      `,
+    });
+
+    return res.json({ message: 'Se o email existir, você receberá instruções em breve' });
+  } catch (error: any) {
+    console.error('Erro reset-password:', error.message);
+    return res.status(500).json({ error: 'Erro ao processar solicitação de reset' });
+  }
+});
+
+// Confirmar reset de senha com token
+app.post('/api/auth/reset-password/confirm', async (req: any, res: any) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) return res.status(400).json({ error: 'Token e nova senha são obrigatórios' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'A senha deve ter pelo menos 6 caracteres' });
+
+    // Buscar token válido
+    const tokenResult = await query(
+      'SELECT * FROM password_reset_tokens WHERE token = $1 AND used = false AND expires_at > NOW()',
+      [token]
+    );
+    if (tokenResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Link de redefinição inválido ou expirado. Solicite um novo.' });
+    }
+
+    const resetRecord = tokenResult.rows[0];
+
+    // Atualizar senha
+    const newHash = await bcrypt.hash(newPassword, 12);
+    await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, resetRecord.user_id]);
+
+    // Marcar token como usado
+    await query('UPDATE password_reset_tokens SET used = true WHERE id = $1', [resetRecord.id]);
+
+    // Invalidar todos os refresh tokens do usuário (segurança)
+    await query('DELETE FROM refresh_tokens WHERE user_id = $1', [resetRecord.user_id]);
+
+    return res.json({ message: 'Senha redefinida com sucesso! Você já pode fazer login.' });
+  } catch (error: any) {
+    console.error('Erro reset-password confirm:', error.message);
+    return res.status(500).json({ error: 'Erro ao redefinir senha' });
+  }
 });
 
 app.put('/api/auth/update-password', authenticateToken, async (req: any, res: any) => {
