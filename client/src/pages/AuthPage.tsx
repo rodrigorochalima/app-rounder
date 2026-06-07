@@ -37,7 +37,8 @@ export default function AuthPage() {
       if (mode === 'login') {
         const session = await login({ email, password, rememberMe });
         setSession(session);
-        setLocation('/');
+        // Usar window.location para garantir navegação e re-hidratação do AuthContext
+        window.location.href = '/';
       } else if (mode === 'signup') {
         const session = await signup({
           email,
@@ -49,7 +50,7 @@ export default function AuthPage() {
           crmState
         });
         setSession(session);
-        setLocation('/');
+        window.location.href = '/';
       } else if (mode === 'reset') {
         await requestPasswordReset({ email });
         setResetEmailSent(true);
