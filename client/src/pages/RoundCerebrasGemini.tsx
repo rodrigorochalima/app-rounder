@@ -232,6 +232,25 @@ export default function RoundCerebrasGemini() {
         console.warn('Erro ao salvar histórico:', e);
       }
 
+      // Ingerir transcrição no índice RAG para contexto futuro
+      try {
+        const token = localStorage.getItem('access_token');
+        if (transcricaoTexto.length > 50) {
+          setMensagemProgresso('🧠 Indexando transcrição no RAG...');
+          await fetch('/api/rag/ingest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              text: transcricaoTexto,
+              source_type: 'round_transcription',
+              source_date: new Date().toISOString().split('T')[0],
+              metadata: { generated_document_preview: resultado.slice(0, 500) }
+            })
+          });
+        }
+      } catch (e) {
+        console.warn('Ingestão RAG não crítica:', e);
+      }
       // Baixar automaticamente
       setTimeout(() => baixarDocx(resultado), 500);
     } catch (error: any) {
@@ -330,10 +349,7 @@ export default function RoundCerebrasGemini() {
     }}>
       <div style={{ maxWidth: '900px', margin: '0 auto' }}>
         {/* Header */}
-        <Header
-          onProfileClick={() => setMostrarPerfil(true)}
-          onAPIConfigClick={() => setMostrarConfigAPIs(true)}
-        />
+        <Header />
 
         {/* Card Principal */}
         <div style={{

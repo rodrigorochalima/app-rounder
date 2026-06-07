@@ -953,6 +953,257 @@ app.delete('/api/clinical/pending/:id', authenticateToken, async (req: any, res:
   }
 });
 
+// ============================================================
+// ROTAS: INSTITUIÇÕES
+// ============================================================
+
+app.get('/api/institutions', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query('SELECT * FROM institutions WHERE user_id = $1 ORDER BY is_default DESC, name ASC', [req.userId]);
+    return res.json(result.rows);
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/institutions', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { name, short_name, logo_base64, address, city, state, phone, email, cnpj, cnes, gps_lat, gps_lng, maps_url, total_beds, icu_type, header_color, header_text_color, is_default } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
+    if (is_default) await query('UPDATE institutions SET is_default = FALSE WHERE user_id = $1', [req.userId]);
+    const result = await query(
+      `INSERT INTO institutions (user_id, name, short_name, logo_base64, address, city, state, phone, email, cnpj, cnes, gps_lat, gps_lng, maps_url, total_beds, icu_type, header_color, header_text_color, is_default)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
+      [req.userId, name, short_name, logo_base64, address, city, state, phone, email, cnpj, cnes, gps_lat, gps_lng, maps_url, total_beds || 10, icu_type || 'UTI Adulto', header_color || '#1e3a5f', header_text_color || '#ffffff', is_default || false]
+    );
+    return res.json(result.rows[0]);
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+app.put('/api/institutions/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { name, short_name, logo_base64, address, city, state, phone, email, cnpj, cnes, gps_lat, gps_lng, maps_url, total_beds, icu_type, header_color, header_text_color, is_default } = req.body;
+    if (is_default) await query('UPDATE institutions SET is_default = FALSE WHERE user_id = $1', [req.userId]);
+    const result = await query(
+      `UPDATE institutions SET name=$1,short_name=$2,logo_base64=$3,address=$4,city=$5,state=$6,phone=$7,email=$8,cnpj=$9,cnes=$10,gps_lat=$11,gps_lng=$12,maps_url=$13,total_beds=$14,icu_type=$15,header_color=$16,header_text_color=$17,is_default=$18,updated_at=NOW()
+       WHERE id=$19 AND user_id=$20 RETURNING *`,
+      [name, short_name, logo_base64, address, city, state, phone, email, cnpj, cnes, gps_lat, gps_lng, maps_url, total_beds, icu_type, header_color, header_text_color, is_default, req.params.id, req.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Instituição não encontrada' });
+    return res.json(result.rows[0]);
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+app.delete('/api/institutions/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    await query('DELETE FROM institutions WHERE id=$1 AND user_id=$2', [req.params.id, req.userId]);
+    return res.json({ success: true });
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ============================================================
+// ROTAS: PERFIL DO MÉDICO
+// ============================================================
+
+app.get('/api/doctor-profile', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query('SELECT * FROM doctor_profiles WHERE user_id=$1', [req.userId]);
+    return res.json(result.rows[0] || null);
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+app.put('/api/doctor-profile', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { full_name, crm, crm_state, specialty, rqe, phone, email, signature_base64, show_crm, show_specialty, show_phone, show_email, show_qrcode, qrcode_url, footer_text } = req.body;
+    const result = await query(
+      `INSERT INTO doctor_profiles (user_id, full_name, crm, crm_state, specialty, rqe, phone, email, signature_base64, show_crm, show_specialty, show_phone, show_email, show_qrcode, qrcode_url, footer_text)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       ON CONFLICT (user_id) DO UPDATE SET full_name=$2,crm=$3,crm_state=$4,specialty=$5,rqe=$6,phone=$7,email=$8,signature_base64=$9,show_crm=$10,show_specialty=$11,show_phone=$12,show_email=$13,show_qrcode=$14,qrcode_url=$15,footer_text=$16,updated_at=NOW()
+       RETURNING *`,
+      [req.userId, full_name, crm, crm_state, specialty, rqe, phone, email, signature_base64, show_crm ?? true, show_specialty ?? true, show_phone ?? false, show_email ?? false, show_qrcode ?? false, qrcode_url, footer_text]
+    );
+    return res.json(result.rows[0]);
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ============================================================
+// ROTAS: RAG — INGESTÃO E BUSCA SEMÂNTICA
+// ============================================================
+
+function chunkTextByBed(text: string): Array<{text: string, bed: string|null, patient: string|null}> {
+  const chunks: Array<{text: string, bed: string|null, patient: string|null}> = [];
+  const lines = text.split('\n');
+  let currentBed: string | null = null;
+  let currentPatient: string | null = null;
+  let currentChunk: string[] = [];
+  const MAX_CHUNK_CHARS = 1500;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const bedMatch = trimmed.match(/(?:leito|box|cama)\s*[:\-]?\s*(\d+[A-Za-z]?)/i) || trimmed.match(/\b([LB]\d+)\b/);
+    if (bedMatch) {
+      if (currentChunk.length > 0) { chunks.push({ text: currentChunk.join(' '), bed: currentBed, patient: currentPatient }); currentChunk = []; }
+      currentBed = bedMatch[1] || bedMatch[0];
+    }
+    const patientMatch = trimmed.match(/(?:paciente|pt\.?)\s*[:\-]?\s*([A-ZÁÉÍÓÚ][a-záéíóú]+(?:\s+[A-ZÁÉÍÓÚ][a-záéíóú]+)*)/i);
+    if (patientMatch) currentPatient = patientMatch[1];
+    currentChunk.push(trimmed);
+    if (currentChunk.join(' ').length > MAX_CHUNK_CHARS) {
+      chunks.push({ text: currentChunk.join(' '), bed: currentBed, patient: currentPatient });
+      currentChunk = [];
+    }
+  }
+  if (currentChunk.length > 0) chunks.push({ text: currentChunk.join(' '), bed: currentBed, patient: currentPatient });
+  if (chunks.length === 0) {
+    const words = text.split(' ');
+    for (let i = 0; i < words.length; i += 300) chunks.push({ text: words.slice(i, i+300).join(' '), bed: null, patient: null });
+  }
+  return chunks;
+}
+
+async function generateEmbedding(text: string, userId: string): Promise<number[] | null> {
+  try {
+    const apiKeyResult = await query(`SELECT api_key FROM user_api_keys WHERE user_id=$1 AND provider='google_gemini' AND is_active=TRUE LIMIT 1`, [userId]);
+    if (apiKeyResult.rows.length > 0) {
+      const apiKey = apiKeyResult.rows[0].api_key;
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'models/text-embedding-004', content: { parts: [{ text: text.slice(0, 2048) }] } })
+      });
+      if (response.ok) { const data: any = await response.json(); return data.embedding?.values || null; }
+    }
+    return null;
+  } catch (_) { return null; }
+}
+
+app.post('/api/rag/ingest', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { text, source_date, institution_id, source_type } = req.body;
+    if (!text) return res.status(400).json({ error: 'Texto é obrigatório' });
+    const chunks = chunkTextByBed(text);
+    let inserted = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const embedding = await generateEmbedding(chunk.text, req.userId);
+      if (embedding) {
+        await query(
+          `INSERT INTO rag_embeddings (user_id, institution_id, source_type, source_date, bed_number, patient_name, chunk_text, chunk_index, embedding, metadata)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::vector,$10)`,
+          [req.userId, institution_id||null, source_type||'transcription', source_date||new Date().toISOString().split('T')[0], chunk.bed, chunk.patient, chunk.text, i, `[${embedding.join(',')}]`, JSON.stringify({ source_type, chars: chunk.text.length })]
+        );
+      } else {
+        await query(
+          `INSERT INTO rag_embeddings (user_id, institution_id, source_type, source_date, bed_number, patient_name, chunk_text, chunk_index, metadata)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [req.userId, institution_id||null, source_type||'transcription', source_date||new Date().toISOString().split('T')[0], chunk.bed, chunk.patient, chunk.text, i, JSON.stringify({ source_type, chars: chunk.text.length, no_embedding: true })]
+        );
+      }
+      inserted++;
+    }
+    await query('DELETE FROM rag_embeddings WHERE user_id=$1 AND expires_at < NOW()', [req.userId]);
+    return res.json({ success: true, chunks_inserted: inserted, total_chunks: chunks.length });
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/rag/search', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { query: searchQuery, institution_id, days_back, limit } = req.body;
+    if (!searchQuery) return res.status(400).json({ error: 'Query é obrigatória' });
+    const queryEmbedding = await generateEmbedding(searchQuery, req.userId);
+    const daysBack = days_back || 60;
+    const resultLimit = limit || 10;
+    let results;
+    if (queryEmbedding) {
+      const embStr = `[${queryEmbedding.join(',')}]`;
+      const q = institution_id
+        ? await query(`SELECT chunk_text,bed_number,patient_name,source_date,source_type,1-(embedding<=>$1::vector) AS similarity FROM rag_embeddings WHERE user_id=$2 AND institution_id=$3 AND source_date>=NOW()-INTERVAL '${daysBack} days' AND embedding IS NOT NULL ORDER BY embedding<=>$1::vector LIMIT $4`, [embStr, req.userId, institution_id, resultLimit])
+        : await query(`SELECT chunk_text,bed_number,patient_name,source_date,source_type,1-(embedding<=>$1::vector) AS similarity FROM rag_embeddings WHERE user_id=$2 AND source_date>=NOW()-INTERVAL '${daysBack} days' AND embedding IS NOT NULL ORDER BY embedding<=>$1::vector LIMIT $3`, [embStr, req.userId, resultLimit]);
+      results = q.rows;
+    } else {
+      const q = await query(`SELECT chunk_text,bed_number,patient_name,source_date,source_type,0.5 AS similarity FROM rag_embeddings WHERE user_id=$1 AND source_date>=NOW()-INTERVAL '${daysBack} days' AND chunk_text ILIKE $2 ORDER BY source_date DESC LIMIT $3`, [req.userId, `%${searchQuery}%`, resultLimit]);
+      results = q.rows;
+    }
+    return res.json({ results, total: results.length });
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/rag/index', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query(`SELECT id,source_type,source_date,bed_number,patient_name,LEFT(chunk_text,100) AS preview,chunk_index,created_at,(embedding IS NOT NULL) AS has_embedding FROM rag_embeddings WHERE user_id=$1 ORDER BY source_date DESC,chunk_index ASC LIMIT 200`, [req.userId]);
+    const stats = await query(`SELECT COUNT(*) AS total_chunks,COUNT(DISTINCT source_date) AS total_days,SUM(LENGTH(chunk_text)) AS total_chars,MIN(source_date) AS oldest_date,MAX(source_date) AS newest_date,COUNT(CASE WHEN embedding IS NOT NULL THEN 1 END) AS chunks_with_embedding FROM rag_embeddings WHERE user_id=$1`, [req.userId]);
+    return res.json({ chunks: result.rows, stats: stats.rows[0] });
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/rag/backup', authenticateToken, async (req: any, res: any) => {
+  try {
+    const chunks = await query(`SELECT source_type,source_date,bed_number,patient_name,chunk_text,chunk_index,metadata,created_at FROM rag_embeddings WHERE user_id=$1 ORDER BY source_date DESC,chunk_index ASC`, [req.userId]);
+    const institutions = await query('SELECT name,short_name,city,state,total_beds,icu_type,created_at FROM institutions WHERE user_id=$1', [req.userId]);
+    const backup = { exported_at: new Date().toISOString(), user_id: req.userId, version: '2.0.0', stats: { total_chunks: chunks.rows.length, total_institutions: institutions.rows.length }, rag_index: chunks.rows, institutions: institutions.rows };
+    try {
+      await query(`INSERT INTO rag_backups (user_id, total_chunks, total_size_bytes, backup_data) VALUES ($1,$2,$3,$4)`, [req.userId, chunks.rows.length, JSON.stringify(backup).length, JSON.stringify(backup)]);
+    } catch (_) {}
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="rag-backup-${new Date().toISOString().split('T')[0]}.json"`);
+    return res.json(backup);
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+app.delete('/api/rag/index', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { days_older_than } = req.body;
+    if (days_older_than) {
+      await query(`DELETE FROM rag_embeddings WHERE user_id=$1 AND source_date < NOW() - ($2 || ' days')::INTERVAL`, [req.userId, days_older_than]);
+    } else {
+      await query('DELETE FROM rag_embeddings WHERE user_id=$1', [req.userId]);
+    }
+    return res.json({ success: true });
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ============================================================
+// ROTAS: SISOP — VERSÕES E ATUALIZAÇÕES
+// ============================================================
+
+app.get('/api/sisop/versions', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query('SELECT * FROM system_versions ORDER BY component ASC');
+    return res.json(result.rows);
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/sisop/check-updates', authenticateToken, async (req: any, res: any) => {
+  try {
+    const updates: any[] = [];
+    try {
+      const ghRes = await fetch('https://api.github.com/repos/rodrigorochalima/app-rounder/releases/latest', { headers: { 'User-Agent': 'app-rounder-sisop' } });
+      if (ghRes.ok) {
+        const release: any = await ghRes.json();
+        const latestVersion = release.tag_name?.replace('v', '') || '2.0.0';
+        await query(`UPDATE system_versions SET latest_version=$1,last_checked=NOW(),update_available=($1!=installed_version),changelog=$2 WHERE component='App Rounder'`, [latestVersion, release.body || '']);
+        updates.push({ component: 'App Rounder', latest: latestVersion });
+      }
+    } catch (_) {}
+    try {
+      const pgvRes = await fetch('https://api.github.com/repos/pgvector/pgvector/releases/latest', { headers: { 'User-Agent': 'app-rounder-sisop' } });
+      if (pgvRes.ok) {
+        const release: any = await pgvRes.json();
+        const latestVersion = release.tag_name?.replace('v', '') || '0.8.0';
+        await query(`UPDATE system_versions SET latest_version=$1,last_checked=NOW(),update_available=($1!=installed_version) WHERE component='pgvector'`, [latestVersion]);
+        updates.push({ component: 'pgvector', latest: latestVersion });
+      }
+    } catch (_) {}
+    await query('UPDATE system_versions SET last_checked=NOW() WHERE last_checked IS NULL');
+    const result = await query('SELECT * FROM system_versions ORDER BY component ASC');
+    return res.json({ checked: updates.length, versions: result.rows });
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+app.get('/api/sisop/backups', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query(`SELECT id,backup_date,total_chunks,total_size_bytes,filename,status FROM rag_backups WHERE user_id=$1 ORDER BY backup_date DESC LIMIT 20`, [req.userId]);
+    return res.json(result.rows);
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
 // ---- FRONTEND (apenas em modo não-serverless) ----
 
 if (process.env.NODE_ENV !== 'production' || process.env.SERVE_STATIC === 'true') {
