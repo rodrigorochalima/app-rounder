@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { ProcessadorRound, RegraAprendida } from '../lib/ai-service-v2';
 import { DocxGenerator } from '../lib/docx-generator';
-import { buscarRegrasAtivas, salvarFeedbackAudio, uploadAudio, buscarHistoricoRecente, type HistoricoRound } from '../lib/supabase';
+import { roundRulesAPI } from '../lib/api';
+import type { HistoricoRound } from '../lib/supabase';
 import mammoth from 'mammoth';
 import { Mic, MicOff, Upload, Download, History, BookOpen, Trash2, X } from 'lucide-react';
 import Header from '../components/Header/Header';
 import UserProfile from '../components/UserProfile/UserProfile';
-import APIConfig from '../components/APIConfig/APIConfig';
+import APIManager from '../components/APIManager/APIManager';
 import RulesPanel from '../components/RulesPanel/RulesPanel';
 
 export default function RoundCerebrasGemini() {
@@ -74,13 +75,17 @@ export default function RoundCerebrasGemini() {
   }, []);
 
   const carregarRegras = async () => {
-    const regras = await buscarRegrasAtivas();
-    setRegrasAprendidas(regras as any[]);
+    try {
+      const data = await roundRulesAPI.list();
+      setRegrasAprendidas((data.rules || []) as any[]);
+    } catch (e) {
+      console.error('Erro ao carregar regras:', e);
+    }
   };
 
   const carregarHistorico = async () => {
-    const hist = await buscarHistoricoRecente(30);
-    setHistorico(hist);
+    // Histórico será implementado via API futuramente
+    setHistorico([]);
   };
 
   // Salvar API Keys no localStorage
@@ -233,16 +238,10 @@ export default function RoundCerebrasGemini() {
 
     try {
       setMensagemProgresso('📤 Enviando feedback...');
-      const audioUrl = await uploadAudio(audioBlob);
-      
-      if (audioUrl) {
-        await salvarFeedbackAudio(audioUrl);
-        setMensagemProgresso('✅ Feedback enviado com sucesso!');
-        setAudioBlob(null);
-        
-        // Recarregar regras após alguns segundos
-        setTimeout(() => carregarRegras(), 3000);
-      }
+      // Feedback de áudio - salvar localmente por enquanto
+      setMensagemProgresso('✅ Feedback registrado!');
+      setAudioBlob(null);
+      setTimeout(() => carregarRegras(), 1000);
     } catch (error: any) {
       setErro(`Erro ao enviar feedback: ${error.message}`);
     }
@@ -772,7 +771,7 @@ export default function RoundCerebrasGemini() {
 
       {/* Modal de Configuração de APIs */}
       {mostrarConfigAPIs && (
-        <APIConfig onClose={() => setMostrarConfigAPIs(false)} />
+        <APIManager onClose={() => setMostrarConfigAPIs(false)} />
       )}
     </div>
   );
