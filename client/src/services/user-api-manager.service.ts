@@ -33,6 +33,10 @@ export interface UserAPIKey {
   notes?: string;
   created_at: string;
   updated_at: string;
+  // Métricas acumuladas (vindas do servidor)
+  total_tokens_used?: number;
+  total_cost_usd?: number;
+  usage_count?: number;
 }
 
 export interface APIKeyStats {

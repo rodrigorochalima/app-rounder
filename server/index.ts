@@ -466,6 +466,135 @@ app.patch('/api/round-rules/reorder', authenticateToken, async (req: any, res: a
   }
 });
 
+// ---- MÉTRICAS E USO DE LLM ----
+
+// Registrar uso de uma LLM (chamado pelo frontend após cada geração)
+app.post('/api/llm-usage', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { provider, api_key_id, tokens_used, cost_usd, duration_ms, model_used, success, error_message } = req.body;
+    // Inserir log de uso
+    await query(
+      `INSERT INTO user_api_usage_logs (user_id, api_key_id, provider, tokens_used, cost_usd, duration_ms, model_used, success, error_message, request_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'generation')`,
+      [req.userId, api_key_id || null, provider, tokens_used || 0, cost_usd || 0, duration_ms || 0, model_used || provider, success !== false, error_message || null]
+    );
+    // Atualizar contadores na tabela de API keys
+    if (api_key_id) {
+      await query(
+        `UPDATE user_api_keys SET 
+          current_month_usage = current_month_usage + 1,
+          usage_count = usage_count + 1,
+          total_tokens_used = total_tokens_used + $1,
+          total_cost_usd = total_cost_usd + $2,
+          last_used_at = NOW()
+         WHERE id = $3 AND user_id = $4`,
+        [tokens_used || 0, cost_usd || 0, api_key_id, req.userId]
+      );
+    }
+    return res.json({ message: 'Uso registrado' });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao registrar uso: ' + error.message });
+  }
+});
+
+// Buscar métricas detalhadas por provedor
+app.get('/api/llm-metrics', authenticateToken, async (req: any, res: any) => {
+  try {
+    // Métricas por provedor (mês atual)
+    const metricsResult = await query(
+      `SELECT 
+        provider,
+        COUNT(*) as total_requests,
+        SUM(tokens_used) as total_tokens,
+        SUM(cost_usd) as total_cost,
+        AVG(duration_ms) as avg_duration_ms,
+        SUM(CASE WHEN success THEN 1 ELSE 0 END) as successful_requests,
+        MAX(created_at) as last_used
+       FROM user_api_usage_logs
+       WHERE user_id = $1 AND created_at >= date_trunc('month', NOW())
+       GROUP BY provider
+       ORDER BY total_requests DESC`,
+      [req.userId]
+    );
+    // Métricas globais do mês
+    const globalResult = await query(
+      `SELECT 
+        COUNT(*) as total_requests,
+        SUM(tokens_used) as total_tokens,
+        SUM(cost_usd) as total_cost,
+        SUM(CASE WHEN success THEN 1 ELSE 0 END) as successful_requests
+       FROM user_api_usage_logs
+       WHERE user_id = $1 AND created_at >= date_trunc('month', NOW())`,
+      [req.userId]
+    );
+    // Extrato dos últimos 30 registros
+    const extractResult = await query(
+      `SELECT provider, tokens_used, cost_usd, duration_ms, model_used, success, error_message, created_at
+       FROM user_api_usage_logs
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 30`,
+      [req.userId]
+    );
+    // API keys com uso acumulado
+    const keysResult = await query(
+      `SELECT id, provider, name, is_active, is_default, current_month_usage, monthly_limit, 
+              total_tokens_used, total_cost_usd, usage_count, last_used_at
+       FROM user_api_keys WHERE user_id = $1 ORDER BY provider, created_at`,
+      [req.userId]
+    );
+    return res.json({
+      by_provider: metricsResult.rows,
+      global: globalResult.rows[0],
+      extract: extractResult.rows,
+      api_keys: keysResult.rows
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao buscar métricas: ' + error.message });
+  }
+});
+
+// Buscar/atualizar configuração de balanceamento
+app.get('/api/llm-balance', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query('SELECT * FROM llm_balance_config WHERE user_id = $1', [req.userId]);
+    if (result.rows.length === 0) {
+      // Criar config padrão
+      const created = await query(
+        `INSERT INTO llm_balance_config (user_id, strategy, priority_order, fallback_enabled)
+         VALUES ($1, 'smart', ARRAY['cerebras','groq','gemini','qwen','deepseek','openai'], true)
+         RETURNING *`,
+        [req.userId]
+      );
+      return res.json({ data: created.rows[0] });
+    }
+    return res.json({ data: result.rows[0] });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao buscar config: ' + error.message });
+  }
+});
+
+app.put('/api/llm-balance', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { strategy, priority_order, fallback_enabled, cost_threshold_usd } = req.body;
+    const result = await query(
+      `INSERT INTO llm_balance_config (user_id, strategy, priority_order, fallback_enabled, cost_threshold_usd)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id) DO UPDATE SET
+         strategy = EXCLUDED.strategy,
+         priority_order = EXCLUDED.priority_order,
+         fallback_enabled = EXCLUDED.fallback_enabled,
+         cost_threshold_usd = EXCLUDED.cost_threshold_usd,
+         updated_at = NOW()
+       RETURNING *`,
+      [req.userId, strategy || 'smart', priority_order || ['cerebras','groq','gemini','qwen','deepseek','openai'], fallback_enabled !== false, cost_threshold_usd || 0.10]
+    );
+    return res.json({ data: result.rows[0] });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao salvar config: ' + error.message });
+  }
+});
+
 // ---- HEALTH ----
 
 app.get('/api/health', async (_req: any, res: any) => {

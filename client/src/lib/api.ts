@@ -199,6 +199,46 @@ export const roundRulesAPI = {
 };
 
 // ============================================================
+// API DE MÉTRICAS DE USO DE LLM
+// ============================================================
+
+export const llmMetricsAPI = {
+  async getMetrics() {
+    return request<any>('GET', '/api/llm-metrics');
+  },
+  async registerUsage(data: {
+    provider: string;
+    api_key_id?: string;
+    tokens_used?: number;
+    cost_usd?: number;
+    duration_ms?: number;
+    model_used?: string;
+    success?: boolean;
+    error_message?: string;
+  }) {
+    return request<any>('POST', '/api/llm-usage', data);
+  },
+};
+
+// ============================================================
+// API DE BALANCEAMENTO DE LLM
+// ============================================================
+
+export const llmBalanceAPI = {
+  async getConfig() {
+    return request<any>('GET', '/api/llm-balance');
+  },
+  async updateConfig(data: {
+    strategy?: string;
+    priority_order?: string[];
+    fallback_enabled?: boolean;
+    cost_threshold_usd?: number;
+  }) {
+    return request<any>('PUT', '/api/llm-balance', data);
+  },
+};
+
+// ============================================================
 // HEALTH CHECK
 // ============================================================
 
