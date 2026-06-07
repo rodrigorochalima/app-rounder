@@ -56,6 +56,14 @@ export const Header: React.FC = () => {
             </button>
 
             <button 
+              className="header-btn btn-api"
+              onClick={() => setShowAPIManager(true)}
+              title="Configurar API Keys"
+            >
+              🔑 APIs
+            </button>
+
+            <button 
               className="header-btn btn-profile"
               onClick={() => setShowProfile(true)}
               title="Meu Perfil"
