@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+
 import './APIConfig.css';
 
 interface APIProvider {
@@ -186,30 +186,10 @@ export const APIConfig: React.FC<APIConfigProps> = ({ onClose }) => {
 
   const loadSavedAPIs = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // Buscar configurações do usuário no Supabase
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('api_config')
-        .eq('id', user.id)
-        .single();
-
-      if (error) {
-        console.error('Erro ao carregar APIs do Supabase:', error);
-        // Fallback para localStorage
-        const saved = localStorage.getItem('selectedAPIs');
-        const keys = localStorage.getItem('apiKeys');
-        if (saved) setSelectedAPIs(JSON.parse(saved));
-        if (keys) setAPIKeys(JSON.parse(keys));
-        return;
-      }
-
-      if (data?.api_config) {
-        setSelectedAPIs(data.api_config.selectedAPIs || []);
-        setAPIKeys(data.api_config.apiKeys || {});
-      }
+      const saved = localStorage.getItem('selectedAPIs');
+      const keys = localStorage.getItem('apiKeys');
+      if (saved) setSelectedAPIs(JSON.parse(saved));
+      if (keys) setAPIKeys(JSON.parse(keys));
     } catch (error) {
       console.error('Erro ao carregar APIs:', error);
     }
@@ -230,32 +210,8 @@ export const APIConfig: React.FC<APIConfigProps> = ({ onClose }) => {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        alert('Você precisa estar logado para salvar as configurações');
-        setIsSaving(false);
-        return;
-      }
-
-      // Salvar no Supabase
-      const { error } = await supabase
-        .from('user_profiles')
-        .update({
-          api_config: {
-            selectedAPIs,
-            apiKeys
-          }
-        })
-        .eq('id', user.id);
-
-      if (error) {
-        console.error('Erro ao salvar no Supabase:', error);
-        // Fallback para localStorage
-        localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
-        localStorage.setItem('apiKeys', JSON.stringify(apiKeys));
-      }
-      
+      localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
+      localStorage.setItem('apiKeys', JSON.stringify(apiKeys));
       setTimeout(() => {
         setIsSaving(false);
         onClose();

@@ -3,7 +3,7 @@
  * Gerencia instituições e membros
  */
 
-import { supabase } from '@/lib/supabase';
+
 import type {
   Institution,
   InstitutionMember,

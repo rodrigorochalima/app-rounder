@@ -1,9 +1,8 @@
 /**
  * Serviço de Autenticação
- * Gerencia login, cadastro, logout e sessão
+ * Usa a API REST própria com Neon PostgreSQL (sem Supabase)
  */
-
-import { supabase } from '@/lib/supabase';
+import { authAPI, profileAPI, setTokens, clearTokens, getRefreshToken } from '@/lib/api';
 import type {
   User,
   AuthSession,
@@ -14,410 +13,121 @@ import type {
   EmailConfirmation,
   LegalAcceptance
 } from '@/types/auth.types';
-import { createAuditLog } from '../audit/audit.service';
 
 /**
  * Faz login do usuário
  */
 export async function login(credentials: LoginCredentials): Promise<AuthSession> {
   const { email, password, rememberMe } = credentials;
-
-  // Login no Supabase Auth
-  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-    email,
-    password
-  });
-
-  if (authError) {
-    throw new Error(`Erro ao fazer login: ${authError.message}`);
-  }
-
-  if (!authData.user || !authData.session) {
-    throw new Error('Erro ao obter dados do usuário');
-  }
-
-  // Buscar dados completos do user_profile
-  const { data: userData, error: userError } = await supabase
-    .from('user_profiles')
-    .select('*')
-    .eq('user_id', authData.user.id)
-    .single();
-
-  if (userError || !userData) {
-    throw new Error('Erro ao buscar dados do usuário');
-  }
-
-  // Login realizado com sucesso
-
-  // Criar log de auditoria
-  await createAuditLog({
-    userId: authData.user.id,
-    action: 'login',
-    resourceType: 'user',
-    resourceId: authData.user.id,
-    details: { rememberMe }
-  });
-
-  // Mapear para tipo User
-  const user: User = mapSupabaseUserToUser(userData);
-
+  const data = await authAPI.login(email, password);
+  setTokens(data.accessToken, data.refreshToken, rememberMe !== false);
   return {
-    user,
-    accessToken: authData.session.access_token,
-    refreshToken: authData.session.refresh_token,
-    expiresAt: authData.session.expires_at || 0
+    user: data.user,
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken,
+    expiresAt: data.expiresAt,
   };
 }
 
 /**
  * Cadastra novo usuário
  */
-export async function signup(data: SignupData): Promise<AuthSession> {
-  const { email, password, fullName, phone, specialty, crm, crmState } = data;
-
-  // Criar usuário no Supabase Auth
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        full_name: fullName,
-        email: email
-      },
-      emailRedirectTo: `${window.location.origin}/auth/confirm`
-    }
-  });
-
-  if (authError) {
-    throw new Error(`Erro ao criar conta: ${authError.message}`);
-  }
-
-  if (!authData.user) {
-    throw new Error('Erro ao criar usuário');
-  }
-
-  console.log('[SIGNUP DEBUG] Usuário criado no Auth:', authData.user.id);
-  console.log('[SIGNUP DEBUG] Email confirmado?', authData.user.email_confirmed_at);
-  console.log('[SIGNUP DEBUG] Session retornada?', !!authData.session);
-
-  // Aguardar 2 segundos para garantir que o usuário foi persistido
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  console.log('[SIGNUP DEBUG] Delay concluído, criando perfil...');
-
-  // Criar perfil do usuário manualmente (não depender do trigger)
-  let userData;
-  const { data: insertData, error: insertError } = await supabase
-    .from('user_profiles')
-    .insert({
-      user_id: authData.user.id,
-      email: email,
-      full_name: fullName,
-      crm: crm || '',
-      crm_state: crmState || '',
-      specialty: specialty || '',
-      phone: phone || '',
-      role: 'rotineiro',
-      onboarding_completed: false
-    })
-    .select()
-    .single();
-
-  if (insertError) {
-    console.log('[SIGNUP DEBUG] Erro ao inserir perfil:', insertError);
-    // Se o perfil já existe (trigger criou), buscar ao invés de inserir
-    if (insertError.code === '23505') {
-      const { data: existingUser, error: fetchError } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('user_id', authData.user.id)
-        .single();
-      
-      if (fetchError || !existingUser) {
-        throw new Error(`Erro ao buscar perfil: ${fetchError?.message || 'Perfil não encontrado'}`);
-      }
-      
-      // Atualizar com dados completos
-      const { data: updatedUser, error: updateError } = await supabase
-        .from('user_profiles')
-        .update({
-          crm,
-          crm_state: crmState,
-          specialty,
-          phone
-        })
-        .eq('user_id', authData.user.id)
-        .select()
-        .single();
-      
-      if (updateError || !updatedUser) {
-        throw new Error(`Erro ao atualizar perfil: ${updateError?.message || 'Perfil não encontrado'}`);
-      }
-      
-      userData = updatedUser;
-    } else {
-      throw new Error(`Erro ao criar perfil: ${insertError.message}`);
-    }
-  } else {
-    userData = insertData;
-  }
-
-  if (!userData) {
-    throw new Error('Erro ao criar perfil do usuário');
-  }
-
-  // Criar log de auditoria
-  await createAuditLog({
-    userId: authData.user.id,
-    action: 'signup',
-    resourceType: 'user',
-    resourceId: authData.user.id,
-    details: { email, fullName }
-  });
-
-  const user: User = mapSupabaseUserToUser(userData);
-
-  // Se não retornou session, usuário precisa confirmar email
-  if (!authData.session) {
-    throw new Error('Conta criada! Verifique seu email para confirmar.');
-  }
-
+export async function signup(signupData: SignupData): Promise<AuthSession> {
+  const { email, password, fullName } = signupData;
+  const data = await authAPI.signup(email, password, fullName);
+  setTokens(data.accessToken, data.refreshToken, true);
   return {
-    user,
-    accessToken: authData.session.access_token,
-    refreshToken: authData.session.refresh_token,
-    expiresAt: authData.session.expires_at || 0
+    user: data.user,
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken,
+    expiresAt: data.expiresAt,
   };
-}
-
-/**
- * Atualiza senha do usuário
- */
-export async function updatePassword(newPassword: string): Promise<void> {
-  const { error } = await supabase.auth.updateUser({
-    password: newPassword
-  });
-
-  if (error) {
-    throw new Error(`Erro ao atualizar senha: ${error.message}`);
-  }
-
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (user) {
-    await createAuditLog({
-      userId: user.id,
-      action: 'password_updated',
-      resourceType: 'user',
-      resourceId: user.id
-    });
-  }
 }
 
 /**
  * Faz logout do usuário
  */
 export async function logout(): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (user) {
-    await createAuditLog({
-      userId: user.id,
-      action: 'logout',
-      resourceType: 'user',
-      resourceId: user.id
-    });
-  }
-
-  const { error } = await supabase.auth.signOut();
-  
-  if (error) {
-    throw new Error(`Erro ao fazer logout: ${error.message}`);
-  }
+  const refreshToken = getRefreshToken();
+  await authAPI.logout(refreshToken || undefined);
+  clearTokens();
 }
 
 /**
  * Solicita reset de senha
  */
 export async function requestPasswordReset(request: PasswordResetRequest): Promise<void> {
-  const { email } = request;
-
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/auth/reset-password`
-  });
-
-  if (error) {
-    throw new Error(`Erro ao solicitar reset de senha: ${error.message}`);
-  }
+  await authAPI.resetPassword(request.email);
 }
 
 /**
- * Confirma reset de senha
+ * Confirma reset de senha (placeholder)
  */
-export async function confirmPasswordReset(confirm: PasswordResetConfirm): Promise<void> {
-  const { token, newPassword } = confirm;
-
-  const { error } = await supabase.auth.updateUser({
-    password: newPassword
-  });
-
-  if (error) {
-    throw new Error(`Erro ao redefinir senha: ${error.message}`);
-  }
-
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (user) {
-    await createAuditLog({
-      userId: user.id,
-      action: 'password_reset',
-      resourceType: 'user',
-      resourceId: user.id
-    });
-  }
+export async function confirmPasswordReset(_confirm: PasswordResetConfirm): Promise<void> {
+  throw new Error('Redefinição via link não disponível nesta versão. Use a opção de alterar senha no perfil.');
 }
 
 /**
- * Confirma email do usuário
+ * Confirma email (não necessário sem verificação de email)
  */
-export async function confirmEmail(confirmation: EmailConfirmation): Promise<void> {
-  const { token } = confirmation;
-
-  const { error } = await supabase.auth.verifyOtp({
-    token_hash: token,
-    type: 'email'
-  });
-
-  if (error) {
-    throw new Error(`Erro ao confirmar email: ${error.message}`);
-  }
-
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (user) {
-    await createAuditLog({
-      userId: user.id,
-      action: 'email_confirmed',
-      resourceType: 'user',
-      resourceId: user.id
-    });
-  }
+export async function confirmEmail(_confirmation: EmailConfirmation): Promise<void> {
+  // Não necessário nesta versão
 }
 
 /**
- * Aceita termos legais (placeholder para compatibilidade)
+ * Aceita termos legais (placeholder)
  */
-export async function acceptLegalTerms(acceptance: LegalAcceptance): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (!user) {
-    throw new Error('Usuário não autenticado');
-  }
-
-  // Registrar aceitação nos logs
-  await createAuditLog({
-    userId: user.id,
-    action: 'legal_terms_accepted',
-    resourceType: 'user',
-    resourceId: user.id,
-    details: acceptance
-  });
+export async function acceptLegalTerms(_acceptance: LegalAcceptance): Promise<void> {
+  // Registrar localmente se necessário
 }
 
 /**
  * Obtém sessão atual
  */
 export async function getCurrentSession(): Promise<AuthSession | null> {
-  const { data: { session } } = await supabase.auth.getSession();
-  
-  if (!session) {
+  try {
+    const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
+    if (!token) return null;
+    const data = await authAPI.me();
+    const refreshToken = localStorage.getItem('refresh_token') || sessionStorage.getItem('refresh_token') || '';
+    return {
+      user: data.user,
+      accessToken: token,
+      refreshToken,
+      expiresAt: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60,
+    };
+  } catch {
+    clearTokens();
     return null;
   }
-
-  const { data: userData } = await supabase
-    .from('user_profiles')
-    .select('*')
-    .eq('user_id', session.user.id)
-    .single();
-
-  if (!userData) {
-    return null;
-  }
-
-  return {
-    user: mapSupabaseUserToUser(userData),
-    accessToken: session.access_token,
-    refreshToken: session.refresh_token,
-    expiresAt: session.expires_at || 0
-  };
 }
 
 /**
  * Atualiza dados do usuário
  */
 export async function updateUserProfile(updates: Partial<User>): Promise<User> {
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (!user) {
-    throw new Error('Usuário não autenticado');
-  }
-
-  const { data, error } = await supabase
-    .from('user_profiles')
-    .update({
-      full_name: updates.fullName,
-      phone: updates.phone,
-      specialty: updates.specialty,
-      crm: updates.crm,
-      crm_state: updates.crmState,
-      avatar_url: updates.avatarUrl,
-      hospital_name: updates.hospitalName,
-      hospital_phone: updates.hospitalPhone,
-      position: updates.position,
-      personal_phone: updates.personalPhone
-    })
-    .eq('user_id', user.id)
-    .select()
-    .single();
-
-  if (error || !data) {
-    throw new Error(`Erro ao atualizar perfil: ${error?.message}`);
-  }
-
-  await createAuditLog({
-    userId: user.id,
-    action: 'profile_updated',
-    resourceType: 'user',
-    resourceId: user.id,
-    details: updates
-  });
-
-  return mapSupabaseUserToUser(data);
+  const payload: any = {
+    full_name: updates.fullName,
+    phone: updates.phone,
+    specialty: updates.specialty,
+    crm: updates.crm,
+    crm_state: updates.crmState,
+    avatar_url: updates.avatarUrl,
+    hospital_name: updates.hospitalName,
+    hospital_phone: updates.hospitalPhone,
+    position: updates.position,
+    personal_phone: updates.personalPhone,
+  };
+  const data = await profileAPI.update(payload);
+  return data.user;
 }
 
 /**
- * Mapeia dados do Supabase para tipo User
+ * Atualiza senha do usuário
  */
-function mapSupabaseUserToUser(data: any): User {
-  return {
-    id: data.user_id || data.id,
-    email: data.email,
-    fullName: data.full_name,
-    avatarUrl: data.avatar_url,
-    phone: data.phone,
-    specialty: data.specialty,
-    crm: data.crm,
-    crmState: data.crm_state,
-    hospitalName: data.hospital_name,
-    hospitalPhone: data.hospital_phone,
-    position: data.position,
-    personalPhone: data.personal_phone,
-    role: data.role || 'rotineiro',
-    onboardingCompleted: data.onboarding_completed || false,
-    createdAt: data.created_at,
-    updatedAt: data.updated_at
-  };
+export async function updatePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await authAPI.updatePassword(currentPassword, newPassword);
 }
-
 
 export const authService = {
   login,
@@ -429,5 +139,5 @@ export const authService = {
   acceptLegalTerms,
   getCurrentSession,
   updateUserProfile,
-  updatePassword
+  updatePassword,
 };

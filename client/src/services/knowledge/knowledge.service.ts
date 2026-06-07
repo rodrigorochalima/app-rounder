@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+
 import { authService } from '../auth';
 
 export interface KnowledgeItem {

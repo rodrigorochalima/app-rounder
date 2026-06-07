@@ -5,7 +5,7 @@
 
 import { useState } from 'react';
 import { X, Check, ChevronRight, Shield, Zap, Users, BarChart } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+
 
 interface OnboardingProps {
   onComplete: () => void;
@@ -27,23 +27,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) throw new Error('Usuário não autenticado');
-
-      // Registrar aceite dos termos
-      await supabase.from('terms_acceptance').insert({
-        user_id: user.id,
-        terms_version: '1.0',
-        ip_address: 'web',
-        user_agent: navigator.userAgent
-      });
-
       // Marcar onboarding como completo
-      await supabase.from('user_profiles').update({
-        onboarding_completed: true
-      }).eq('user_id', user.id);
-
       onComplete();
     } catch (error) {
       console.error('Erro ao completar onboarding:', error);

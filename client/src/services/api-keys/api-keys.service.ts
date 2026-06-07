@@ -3,7 +3,7 @@
  * Gerencia chaves de API com criptografia
  */
 
-import { supabase } from '@/lib/supabase';
+
 import type { APIKey, DecryptedAPIKey, CreateAPIKeyData, UpdateAPIKeyData, AIProvider } from '@/types/api-key.types';
 import { encryptText, decryptText } from '@/lib/encryption';
 import { createAuditLog } from '../audit/audit.service';

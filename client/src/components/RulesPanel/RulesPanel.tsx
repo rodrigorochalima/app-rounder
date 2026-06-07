@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
-import { authService } from '@/services/auth';
+import { roundRulesAPI } from '@/lib/api';
 import './RulesPanel.css';
 
 interface Rule {
@@ -14,74 +13,6 @@ interface Rule {
 interface RulesPanelProps {
   onClose: () => void;
 }
-
-// Regras pré-formatadas que todo usuário recebe ao criar conta
-const DEFAULT_RULES = [
-  {
-    rule_text: "Sempre iniciar o round com o nome completo do paciente, idade e leito",
-    order_index: 1
-  },
-  {
-    rule_text: "Incluir diagnóstico principal e diagnósticos secundários em ordem de relevância",
-    order_index: 2
-  },
-  {
-    rule_text: "Descrever quadro clínico atual de forma objetiva e concisa",
-    order_index: 3
-  },
-  {
-    rule_text: "Listar medicações em uso com doses e horários",
-    order_index: 4
-  },
-  {
-    rule_text: "Incluir resultados de exames laboratoriais relevantes com valores de referência",
-    order_index: 5
-  },
-  {
-    rule_text: "Descrever exames de imagem com achados principais",
-    order_index: 6
-  },
-  {
-    rule_text: "Apresentar sinais vitais (PA, FC, FR, Tax, SatO2)",
-    order_index: 7
-  },
-  {
-    rule_text: "Incluir balanço hídrico quando relevante",
-    order_index: 8
-  },
-  {
-    rule_text: "Descrever plano terapêutico de forma clara e sequencial",
-    order_index: 9
-  },
-  {
-    rule_text: "Mencionar pendências e condutas a serem tomadas",
-    order_index: 10
-  },
-  {
-    rule_text: "Incluir evolução clínica comparada ao dia anterior",
-    order_index: 11
-  },
-  {
-    rule_text: "Usar terminologia médica adequada e padronizada",
-    order_index: 12
-  },
-  {
-    rule_text: "Evitar abreviações não padronizadas",
-    order_index: 13
-  },
-  {
-    rule_text: "Manter formatação clara com parágrafos e tópicos quando apropriado",
-    order_index: 14
-  },
-  {
-    rule_text: "Incluir data e hora da evolução",
-    order_index: 15
-  },
-  {
-    rule_text: "Finalizar com assinatura digital do médico responsável",
-    order_index: 16
-  }
-];
 
 export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
   const [rules, setRules] = useState<Rule[]>([]);
@@ -98,28 +29,8 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
   const loadRules = async () => {
     try {
       setLoading(true);
-      const session = await authService.getCurrentSession();
-      
-      if (!session?.user) {
-        throw new Error('Usuário não autenticado');
-      }
-
-      const { data, error } = await supabase
-        .from('round_rules')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .order('order_index', { ascending: true });
-
-      if (error) throw error;
-
-      // Se não tem regras, criar as regras padrão
-      if (!data || data.length === 0) {
-        await createDefaultRules(session.user.id);
-        await loadRules(); // Recarregar após criar
-        return;
-      }
-
-      setRules(data);
+      const result = await roundRulesAPI.list();
+      setRules(result.data || []);
     } catch (error) {
       console.error('Erro ao carregar regras:', error);
       alert('Erro ao carregar regras');
@@ -128,35 +39,10 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
     }
   };
 
-  const createDefaultRules = async (userId: string) => {
-    try {
-      const rulesToInsert = DEFAULT_RULES.map(rule => ({
-        user_id: userId,
-        rule_text: rule.rule_text,
-        is_active: true,
-        order_index: rule.order_index
-      }));
-
-      const { error } = await supabase
-        .from('round_rules')
-        .insert(rulesToInsert);
-
-      if (error) throw error;
-    } catch (error) {
-      console.error('Erro ao criar regras padrão:', error);
-    }
-  };
-
   const toggleRule = async (ruleId: string, currentStatus: boolean) => {
     try {
-      const { error } = await supabase
-        .from('round_rules')
-        .update({ is_active: !currentStatus })
-        .eq('id', ruleId);
-
-      if (error) throw error;
-
-      setRules(rules.map(rule => 
+      await roundRulesAPI.update(ruleId, { is_active: !currentStatus });
+      setRules(rules.map(rule =>
         rule.id === ruleId ? { ...rule, is_active: !currentStatus } : rule
       ));
     } catch (error) {
@@ -181,18 +67,10 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
         alert('O texto da regra não pode estar vazio');
         return;
       }
-
-      const { error } = await supabase
-        .from('round_rules')
-        .update({ rule_text: editText })
-        .eq('id', ruleId);
-
-      if (error) throw error;
-
-      setRules(rules.map(rule => 
+      await roundRulesAPI.update(ruleId, { rule_text: editText });
+      setRules(rules.map(rule =>
         rule.id === ruleId ? { ...rule, rule_text: editText } : rule
       ));
-
       setEditingId(null);
       setEditText('');
     } catch (error) {
@@ -207,34 +85,17 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
         alert('Digite o texto da nova regra');
         return;
       }
-
-      // Verificar limite de 40 regras
       if (rules.length >= 40) {
-        alert('Limite de 40 regras atingido! Para adicionar mais, entre em contato com o suporte.');
+        alert('Limite de 40 regras atingido!');
         return;
       }
-
-      const session = await authService.getCurrentSession();
-      if (!session?.user) {
-        throw new Error('Usuário não autenticado');
-      }
-
       const maxOrder = Math.max(...rules.map(r => r.order_index), 0);
-
-      const { data, error } = await supabase
-        .from('round_rules')
-        .insert({
-          user_id: session.user.id,
-          rule_text: newRuleText,
-          is_active: true,
-          order_index: maxOrder + 1
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setRules([...rules, data]);
+      const result = await roundRulesAPI.create({
+        rule_text: newRuleText,
+        is_active: true,
+        order_index: maxOrder + 1,
+      });
+      setRules([...rules, result.data]);
       setNewRuleText('');
       setShowAddForm(false);
     } catch (error) {
@@ -244,18 +105,9 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
   };
 
   const deleteRule = async (ruleId: string) => {
-    if (!confirm('Tem certeza que deseja excluir esta regra?')) {
-      return;
-    }
-
+    if (!confirm('Tem certeza que deseja excluir esta regra?')) return;
     try {
-      const { error } = await supabase
-        .from('round_rules')
-        .delete()
-        .eq('id', ruleId);
-
-      if (error) throw error;
-
+      await roundRulesAPI.delete(ruleId);
       setRules(rules.filter(rule => rule.id !== ruleId));
     } catch (error) {
       console.error('Erro ao excluir regra:', error);
@@ -266,28 +118,20 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
   const moveRule = async (ruleId: string, direction: 'up' | 'down') => {
     const currentIndex = rules.findIndex(r => r.id === ruleId);
     if (currentIndex === -1) return;
-
     const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (newIndex < 0 || newIndex >= rules.length) return;
 
     const newRules = [...rules];
     [newRules[currentIndex], newRules[newIndex]] = [newRules[newIndex], newRules[currentIndex]];
 
-    // Atualizar order_index
     const updates = newRules.map((rule, index) => ({
       id: rule.id,
-      order_index: index + 1
+      order_index: index + 1,
     }));
 
     try {
-      for (const update of updates) {
-        await supabase
-          .from('round_rules')
-          .update({ order_index: update.order_index })
-          .eq('id', update.id);
-      }
-
-      setRules(newRules);
+      await roundRulesAPI.reorder(updates);
+      setRules(newRules.map((rule, index) => ({ ...rule, order_index: index + 1 })));
     } catch (error) {
       console.error('Erro ao reordenar regras:', error);
       alert('Erro ao reordenar regras');
@@ -375,31 +219,19 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
 
                       {editingId === rule.id ? (
                         <>
-                          <button
-                            onClick={() => saveEdit(rule.id)}
-                            className="rule-btn rule-btn-save"
-                          >
+                          <button onClick={() => saveEdit(rule.id)} className="rule-btn rule-btn-save">
                             ✓ Salvar
                           </button>
-                          <button
-                            onClick={cancelEdit}
-                            className="rule-btn rule-btn-cancel"
-                          >
+                          <button onClick={cancelEdit} className="rule-btn rule-btn-cancel">
                             ✕ Cancelar
                           </button>
                         </>
                       ) : (
                         <>
-                          <button
-                            onClick={() => startEdit(rule)}
-                            className="rule-btn rule-btn-edit"
-                          >
+                          <button onClick={() => startEdit(rule)} className="rule-btn rule-btn-edit">
                             ✏️ Editar
                           </button>
-                          <button
-                            onClick={() => deleteRule(rule.id)}
-                            className="rule-btn rule-btn-delete"
-                          >
+                          <button onClick={() => deleteRule(rule.id)} className="rule-btn rule-btn-delete">
                             🗑️
                           </button>
                         </>
@@ -424,10 +256,7 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
                         ✓ Adicionar Regra
                       </button>
                       <button
-                        onClick={() => {
-                          setShowAddForm(false);
-                          setNewRuleText('');
-                        }}
+                        onClick={() => { setShowAddForm(false); setNewRuleText(''); }}
                         className="btn-cancel-add"
                       >
                         Cancelar
@@ -435,10 +264,7 @@ export const RulesPanel: React.FC<RulesPanelProps> = ({ onClose }) => {
                     </div>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => setShowAddForm(true)}
-                    className="btn-show-add-form"
-                  >
+                  <button onClick={() => setShowAddForm(true)} className="btn-show-add-form">
                     ➕ Adicionar Nova Regra
                   </button>
                 )}
