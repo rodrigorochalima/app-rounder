@@ -2,13 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { ProcessadorRound, RegraAprendida } from '../lib/ai-service-v2';
 import { DocxGenerator } from '../lib/docx-generator';
 import { roundRulesAPI } from '../lib/api';
-import type { HistoricoRound } from '../lib/supabase';
 import mammoth from 'mammoth';
-import { Mic, MicOff, Upload, Download, History, BookOpen, Trash2, X } from 'lucide-react';
+import { Mic, MicOff, Upload, Download, History, BookOpen, Trash2, X, Brain, CheckCircle } from 'lucide-react';
 import Header from '../components/Header/Header';
 import UserProfile from '../components/UserProfile/UserProfile';
 import APIManager from '../components/APIManager/APIManager';
 import RulesPanel from '../components/RulesPanel/RulesPanel';
+import UniversalInputArea from '../components/UniversalInput/UniversalInputArea';
+import ClinicalContextPanel from '../components/ClinicalContext/ClinicalContextPanel';
 
 export default function RoundCerebrasGemini() {
   // Estados de configuração
@@ -18,7 +19,11 @@ export default function RoundCerebrasGemini() {
 
   // Estados de documentos
   const [docAnterior, setDocAnterior] = useState<File | null>(null);
-  const [transcricao, setTranscricao] = useState<File | null>(null);
+
+  // Estados de transcrição universal (texto ou arquivo)
+  const [transcricaoTexto, setTranscricaoTexto] = useState<string>('');
+  const [transcricaoFileName, setTranscricaoFileName] = useState<string>('');
+  const [transcricaoAudio, setTranscricaoAudio] = useState<File | null>(null);
 
   // Estados de processamento
   const [processando, setProcessando] = useState(false);
@@ -35,8 +40,9 @@ export default function RoundCerebrasGemini() {
   const [mostrarRegras, setMostrarRegras] = useState(false);
 
   // Estados de histórico
-  const [historico, setHistorico] = useState<HistoricoRound[]>([]);
+  const [historico, setHistorico] = useState<any[]>([]);
   const [mostrarHistorico, setMostrarHistorico] = useState(false);
+  const [carregandoHistorico, setCarregandoHistorico] = useState(false);
 
   // Estados de gravação de áudio
   const [gravando, setGravando] = useState(false);
@@ -47,29 +53,16 @@ export default function RoundCerebrasGemini() {
   // Estados de modais
   const [mostrarPerfil, setMostrarPerfil] = useState(false);
   const [mostrarConfigAPIs, setMostrarConfigAPIs] = useState(false);
+  const [mostrarContexto, setMostrarContexto] = useState(false);
 
-  // Carregar API Keys do localStorage (LIMPAR PRIMEIRO)
+  // Carregar API Keys do localStorage
   useEffect(() => {
-    // Limpar API keys antigas que podem estar expiradas
-    const ultimaLimpeza = localStorage.getItem('ultima_limpeza_keys');
-    const agora = Date.now();
-    const umDia = 24 * 60 * 60 * 1000;
-
-    if (!ultimaLimpeza || (agora - parseInt(ultimaLimpeza)) > umDia) {
-      // Limpar apenas se passou mais de 1 dia
-      localStorage.removeItem('deepseek_api_key');
-      localStorage.setItem('ultima_limpeza_keys', agora.toString());
-    }
-
     const savedCerebras = localStorage.getItem('cerebras_api_key');
     const savedDeepSeek = localStorage.getItem('deepseek_api_key');
     const savedGroq = localStorage.getItem('groq_api_key');
-
     if (savedCerebras) setCerebrasKey(savedCerebras);
     if (savedDeepSeek) setDeepseekKey(savedDeepSeek);
     if (savedGroq) setGroqKey(savedGroq);
-
-    // Carregar regras do Supabase
     carregarRegras();
     carregarHistorico();
   }, []);
@@ -84,11 +77,23 @@ export default function RoundCerebrasGemini() {
   };
 
   const carregarHistorico = async () => {
-    // Histórico será implementado via API futuramente
-    setHistorico([]);
+    setCarregandoHistorico(true);
+    try {
+      const token = localStorage.getItem('access_token');
+      const res = await fetch('/api/rounds/history?limit=20', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setHistorico(data);
+      }
+    } catch (e) {
+      console.error('Erro ao carregar histórico:', e);
+    } finally {
+      setCarregandoHistorico(false);
+    }
   };
 
-  // Salvar API Keys no localStorage
   const salvarCerebrasKey = (key: string) => {
     setCerebrasKey(key);
     if (key) localStorage.setItem('cerebras_api_key', key);
@@ -105,13 +110,35 @@ export default function RoundCerebrasGemini() {
   };
 
   // Verificar se pode processar
-  const podeProcessar = cerebrasKey.length > 10 && deepseekKey.length > 10 && groqKey.length > 10 && docAnterior !== null && transcricao !== null;
+  const temTranscricao = transcricaoTexto.length > 10 || transcricaoAudio !== null;
+  const podeProcessar = cerebrasKey.length > 10 && deepseekKey.length > 10 && groqKey.length > 10 && docAnterior !== null && temTranscricao;
 
   // Ler arquivo .docx
   const lerDocx = async (file: File): Promise<string> => {
     const arrayBuffer = await file.arrayBuffer();
     const result = await mammoth.extractRawText({ arrayBuffer });
     return result.value;
+  };
+
+  // Handler para texto pronto da UniversalInputArea
+  const handleTranscricaoTexto = (text: string, sourceName: string) => {
+    setTranscricaoTexto(text);
+    setTranscricaoFileName(sourceName);
+    setTranscricaoAudio(null);
+  };
+
+  // Handler para arquivo de áudio da UniversalInputArea
+  const handleTranscricaoAudio = (file: File) => {
+    setTranscricaoAudio(file);
+    setTranscricaoTexto('');
+    setTranscricaoFileName(file.name);
+  };
+
+  // Limpar transcrição
+  const limparTranscricao = () => {
+    setTranscricaoTexto('');
+    setTranscricaoFileName('');
+    setTranscricaoAudio(null);
   };
 
   // Processar round
@@ -131,24 +158,45 @@ export default function RoundCerebrasGemini() {
       setMensagemProgresso('📄 Lendo documento anterior...');
       const textoDocAnterior = await lerDocx(docAnterior!);
 
-      // Verificar se é áudio ou texto
-      const isAudio = transcricao!.type.startsWith('audio/');
+      // Buscar contexto RAG clínico
+      let contextoClinco = '';
+      try {
+        const token = localStorage.getItem('access_token');
+        const ragRes = await fetch('/api/clinical/rag-context', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (ragRes.ok) {
+          const ragData = await ragRes.json();
+          if (ragData.active_patients?.length > 0 || ragData.pending_items?.length > 0) {
+            setMensagemProgresso('🧠 Carregando contexto clínico dos pacientes...');
+            contextoClinco = buildRagContext(ragData);
+          }
+        }
+      } catch (e) {
+        console.warn('Contexto RAG não disponível:', e);
+      }
+
       let resultado: string;
 
-      if (isAudio) {
+      if (transcricaoAudio) {
+        // Processamento com áudio
         resultado = await processador.processarComAudio(
           textoDocAnterior,
-          transcricao!,
+          transcricaoAudio,
           (prog, msg) => {
             setProgresso(prog);
             setMensagemProgresso(msg);
           }
         );
       } else {
-        const textoTranscricao = await lerDocx(transcricao!);
+        // Processamento com texto (colado, digitado ou de arquivo)
+        const textoFinal = contextoClinco
+          ? `[CONTEXTO CLÍNICO DOS PACIENTES - USE PARA RASTREAR PENDÊNCIAS E EVOLUÇÃO]\n${contextoClinco}\n\n[TRANSCRIÇÃO DO ROUND DE HOJE]\n${transcricaoTexto}`
+          : transcricaoTexto;
+
         resultado = await processador.processar(
           textoDocAnterior,
-          textoTranscricao,
+          textoFinal,
           (prog, msg) => {
             setProgresso(prog);
             setMensagemProgresso(msg);
@@ -161,11 +209,31 @@ export default function RoundCerebrasGemini() {
       setProgresso(100);
       setMensagemProgresso('✅ Round gerado com sucesso!');
 
-      // Baixar automaticamente
-      setTimeout(() => baixarDocx(), 500);
+      // Salvar no histórico
+      try {
+        const token = localStorage.getItem('access_token');
+        const today = new Date().toISOString().split('T')[0];
+        const roundName = `Round ${today.split('-').reverse().join('').slice(0, 6)}`;
+        await fetch('/api/rounds/history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            round_date: today,
+            round_name: roundName,
+            transcription_text: transcricaoTexto.slice(0, 5000),
+            generated_document: resultado,
+            raw_input_text: transcricaoTexto.slice(0, 2000),
+            llm_provider: 'cerebras+deepseek+groq',
+            tokens_used: Math.round(resultado.length / 4)
+          })
+        });
+        carregarHistorico();
+      } catch (e) {
+        console.warn('Erro ao salvar histórico:', e);
+      }
 
-      // Recarregar histórico
-      carregarHistorico();
+      // Baixar automaticamente
+      setTimeout(() => baixarDocx(resultado), 500);
     } catch (error: any) {
       setErro(`Erro no processamento: ${error.message}`);
       setProgresso(0);
@@ -174,23 +242,41 @@ export default function RoundCerebrasGemini() {
     }
   };
 
-  // Baixar documento .docx
-  const baixarDocx = async () => {
-    if (!documentoGerado) return;
+  // Construir contexto RAG para injetar no prompt
+  const buildRagContext = (ragData: any): string => {
+    let ctx = '';
+    if (ragData.active_patients?.length > 0) {
+      ctx += 'PACIENTES ATIVOS:\n';
+      for (const p of ragData.active_patients) {
+        ctx += `- Leito ${p.bed_number}: ${p.patient_name || 'Sem nome'} | Diagnóstico: ${p.main_diagnosis || '-'} | Status: ${p.current_status || '-'}`;
+        if (p.pending_exams) ctx += ` | PENDÊNCIAS: ${p.pending_exams}`;
+        if (p.active_antibiotics) ctx += ` | ATB: ${p.active_antibiotics}`;
+        ctx += '\n';
+      }
+    }
+    if (ragData.pending_items?.length > 0) {
+      ctx += '\nITENS PENDENTES:\n';
+      for (const item of ragData.pending_items) {
+        ctx += `- Leito ${item.bed_number}: [${item.item_type.toUpperCase()}] ${item.description} (desde ${item.requested_date})\n`;
+      }
+    }
+    return ctx;
+  };
 
+  // Baixar documento .docx
+  const baixarDocx = async (doc?: string) => {
+    const docToDownload = doc || documentoGerado;
+    if (!docToDownload) return;
     try {
       const nomeArquivo = DocxGenerator.gerarNomeArquivo('Round');
       await DocxGenerator.gerar(
-        documentoGerado,
+        docToDownload,
         nomeArquivo,
         {
           titulo: 'Round de Hoje',
-          instituicao: 'Hospital Sanador Caneto',
+          instituicao: 'Hospital',
           data: new Date().toLocaleDateString('pt-BR', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
+            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
           })
         }
       );
@@ -206,19 +292,14 @@ export default function RoundCerebrasGemini() {
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
-
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
-
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(audioBlob);
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setAudioBlob(blob);
         stream.getTracks().forEach(track => track.stop());
       };
-
       mediaRecorder.start();
       setGravando(true);
     } catch (error: any) {
@@ -235,16 +316,9 @@ export default function RoundCerebrasGemini() {
 
   const enviarFeedback = async () => {
     if (!audioBlob) return;
-
-    try {
-      setMensagemProgresso('📤 Enviando feedback...');
-      // Feedback de áudio - salvar localmente por enquanto
-      setMensagemProgresso('✅ Feedback registrado!');
-      setAudioBlob(null);
-      setTimeout(() => carregarRegras(), 1000);
-    } catch (error: any) {
-      setErro(`Erro ao enviar feedback: ${error.message}`);
-    }
+    setMensagemProgresso('✅ Feedback registrado!');
+    setAudioBlob(null);
+    setTimeout(() => carregarRegras(), 1000);
   };
 
   return (
@@ -254,12 +328,9 @@ export default function RoundCerebrasGemini() {
       padding: '20px',
       fontFamily: 'system-ui, -apple-system, sans-serif'
     }}>
-      <div style={{
-        maxWidth: '900px',
-        margin: '0 auto'
-      }}>
-        {/* Header com botões de perfil e APIs */}
-        <Header 
+      <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+        {/* Header */}
+        <Header
           onProfileClick={() => setMostrarPerfil(true)}
           onAPIConfigClick={() => setMostrarConfigAPIs(true)}
         />
@@ -268,326 +339,245 @@ export default function RoundCerebrasGemini() {
         <div style={{
           background: 'white',
           borderRadius: '16px',
-          padding: '32px',
+          padding: '28px',
           boxShadow: '0 8px 32px rgba(0,0,0,0.1)',
           marginBottom: '20px'
         }}>
-          {/* Aviso sobre configuração de APIs */}
+          {/* Aviso sobre APIs */}
           {(!cerebrasKey || !deepseekKey || !groqKey) && (
             <div style={{
-              background: '#FFF3CD',
-              border: '1px solid #FFE69C',
-              borderRadius: '8px',
-              padding: '16px',
-              marginBottom: '24px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px'
+              background: '#FFF3CD', border: '1px solid #FFE69C', borderRadius: '8px',
+              padding: '14px 16px', marginBottom: '24px',
+              display: 'flex', alignItems: 'center', gap: '12px'
             }}>
-              <span style={{ fontSize: '24px' }}>⚠️</span>
+              <span style={{ fontSize: '22px' }}>⚠️</span>
               <div>
-                <p style={{ margin: '0 0 4px 0', fontWeight: '600', color: '#856404' }}>
+                <p style={{ margin: '0 0 2px 0', fontWeight: '600', color: '#856404', fontSize: '14px' }}>
                   Configure suas API Keys
                 </p>
-                <p style={{ margin: 0, fontSize: '14px', color: '#856404' }}>
+                <p style={{ margin: 0, fontSize: '13px', color: '#856404' }}>
                   Clique no botão "🔑 APIs" no topo da página para configurar suas chaves de API gratuitas.
                 </p>
               </div>
             </div>
           )}
 
+          {/* Botão Contexto Clínico RAG */}
+          <div style={{ marginBottom: '20px' }}>
+            <button
+              onClick={() => setMostrarContexto(true)}
+              style={{
+                width: '100%', padding: '12px 16px',
+                background: 'linear-gradient(135deg, #6C3483 0%, #9B59B6 100%)',
+                color: 'white', border: 'none', borderRadius: '10px',
+                cursor: 'pointer', fontWeight: '600', fontSize: '14px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                boxShadow: '0 4px 12px rgba(108, 52, 131, 0.3)'
+              }}
+            >
+              <Brain size={18} />
+              🧠 Contexto Clínico dos Pacientes (RAG)
+              <span style={{
+                background: 'rgba(255,255,255,0.2)', borderRadius: '12px',
+                padding: '2px 8px', fontSize: '11px', marginLeft: '4px'
+              }}>
+                Memória entre rounds
+              </span>
+            </button>
+          </div>
+
           {/* Upload de Documentos */}
-          <div style={{ marginBottom: '32px' }}>
-            <h2 style={{
-              fontSize: '20px',
-              fontWeight: '600',
-              color: '#2C3E50',
-              marginBottom: '20px'
-            }}>
+          <div style={{ marginBottom: '28px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#2C3E50', marginBottom: '16px' }}>
               📄 Documentos
             </h2>
 
             {/* Documento Anterior */}
             <div style={{ marginBottom: '16px' }}>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#2C3E50',
-                marginBottom: '8px'
-              }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#2C3E50', marginBottom: '6px' }}>
                 Documento do Round Anterior
               </label>
-              <div style={{
-                border: '2px dashed #5B9BD5',
-                borderRadius: '8px',
-                padding: '20px',
-                textAlign: 'center',
-                background: '#F8FCFF',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.currentTarget.style.background = '#E8F4FF';
-              }}
-              onDragLeave={(e) => {
-                e.currentTarget.style.background = '#F8FCFF';
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.currentTarget.style.background = '#F8FCFF';
-                const file = e.dataTransfer.files[0];
-                if (file && file.name.endsWith('.docx')) {
-                  setDocAnterior(file);
-                }
-              }}
-              onClick={() => document.getElementById('docAnterior')?.click()}
-              >
-                <Upload size={32} color="#5B9BD5" style={{ marginBottom: '8px' }} />
-                <p style={{ margin: '0 0 4px 0', color: '#2C3E50', fontWeight: '500' }}>
-                  {docAnterior ? docAnterior.name : 'Clique ou arraste o arquivo .docx'}
-                </p>
-                <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>
-                  Aceita: .docx
-                </p>
-                <input
-                  id="docAnterior"
-                  type="file"
-                  accept=".docx"
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
+              {docAnterior ? (
+                <div style={{
+                  border: '2px solid #27AE60', borderRadius: '10px', padding: '12px 14px',
+                  background: '#F0FFF4', display: 'flex', alignItems: 'center', gap: '10px'
+                }}>
+                  <CheckCircle size={18} color="#27AE60" />
+                  <span style={{ flex: 1, fontSize: '13px', color: '#27AE60', fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {docAnterior.name}
+                  </span>
+                  <button onClick={() => setDocAnterior(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#999' }}>
+                    <X size={16} />
+                  </button>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    border: '2px dashed #5B9BD5', borderRadius: '10px', padding: '18px',
+                    textAlign: 'center', background: '#F8FCFF', cursor: 'pointer', transition: 'all 0.2s'
+                  }}
+                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.background = '#E8F4FF'; }}
+                  onDragLeave={(e) => { e.currentTarget.style.background = '#F8FCFF'; }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.style.background = '#F8FCFF';
+                    const file = e.dataTransfer.files[0];
                     if (file) setDocAnterior(file);
                   }}
-                />
-              </div>
+                  onClick={() => document.getElementById('docAnterior')?.click()}
+                >
+                  <Upload size={26} color="#5B9BD5" style={{ marginBottom: '6px' }} />
+                  <p style={{ margin: '0 0 2px 0', color: '#2C3E50', fontWeight: '500', fontSize: '14px' }}>
+                    Clique ou arraste o arquivo .docx
+                  </p>
+                  <p style={{ margin: 0, fontSize: '11px', color: '#888' }}>Aceita: .docx</p>
+                  <input
+                    id="docAnterior" type="file" accept=".docx" style={{ display: 'none' }}
+                    onChange={(e) => { const file = e.target.files?.[0]; if (file) setDocAnterior(file); }}
+                  />
+                </div>
+              )}
             </div>
 
-            {/* Transcrição ou Áudio */}
+            {/* Transcrição Universal */}
             <div>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#2C3E50',
-                marginBottom: '8px'
-              }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#2C3E50', marginBottom: '6px' }}>
                 Transcrição ou Áudio do Dia
               </label>
-              <div style={{
-                border: '2px dashed #F4A582',
-                borderRadius: '8px',
-                padding: '20px',
-                textAlign: 'center',
-                background: '#FFF8F5',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.currentTarget.style.background = '#FFE8DD';
-              }}
-              onDragLeave={(e) => {
-                e.currentTarget.style.background = '#FFF8F5';
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.currentTarget.style.background = '#FFF8F5';
-                const file = e.dataTransfer.files[0];
-                if (file) {
-                  setTranscricao(file);
-                }
-              }}
-              onClick={() => document.getElementById('transcricao')?.click()}
-              >
-                <Upload size={32} color="#F4A582" style={{ marginBottom: '8px' }} />
-                <p style={{ margin: '0 0 4px 0', color: '#2C3E50', fontWeight: '500' }}>
-                  {transcricao ? transcricao.name : 'Clique ou arraste o arquivo'}
-                </p>
-                <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>
-                  Aceita: .docx, .txt ou .mp3, .wav, .webm
-                </p>
-                <input
-                  id="transcricao"
-                  type="file"
-                  accept=".docx,.txt,.mp3,.wav,.webm,.m4a"
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) setTranscricao(file);
-                  }}
-                />
-              </div>
+              <UniversalInputArea
+                onTextReady={handleTranscricaoTexto}
+                onFileReady={handleTranscricaoAudio}
+                currentValue={transcricaoTexto}
+                currentFileName={transcricaoFileName}
+                onClear={limparTranscricao}
+              />
             </div>
           </div>
+
+          {/* Barra de progresso */}
+          {processando && (
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <span style={{ fontSize: '13px', color: '#666' }}>{mensagemProgresso}</span>
+                <span style={{ fontSize: '13px', fontWeight: '600', color: '#5B9BD5' }}>{progresso}%</span>
+              </div>
+              <div style={{ height: '8px', background: '#E0E0E0', borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', width: `${progresso}%`,
+                  background: 'linear-gradient(90deg, #5B9BD5, #9B59B6)',
+                  borderRadius: '4px', transition: 'width 0.3s ease'
+                }} />
+              </div>
+            </div>
+          )}
+
+          {/* Erro */}
+          {erro && (
+            <div style={{
+              background: '#FFF0F0', border: '1px solid #FFCDD2', borderRadius: '8px',
+              padding: '12px 16px', marginBottom: '20px', color: '#E53935', fontSize: '14px'
+            }}>
+              ❌ {erro}
+            </div>
+          )}
+
+          {/* Sucesso */}
+          {sucesso && !processando && (
+            <div style={{
+              background: '#F0FFF4', border: '2px solid #8BC34A', borderRadius: '8px',
+              padding: '14px 16px', marginBottom: '20px', textAlign: 'center'
+            }}>
+              <strong style={{ color: '#2E7D32' }}>✅ Round gerado com sucesso!</strong>
+              <br />
+              <small style={{ color: '#555' }}>O download do arquivo .docx iniciou automaticamente.</small>
+              <br />
+              <button
+                onClick={() => baixarDocx()}
+                style={{
+                  marginTop: '8px', padding: '8px 16px', background: '#2E7D32',
+                  color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer',
+                  fontSize: '13px', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '6px'
+                }}
+              >
+                <Download size={14} /> Baixar novamente
+              </button>
+            </div>
+          )}
 
           {/* Botão Gerar */}
           <button
             onClick={processarRound}
             disabled={!podeProcessar || processando}
             style={{
-              width: '100%',
-              padding: '16px',
-              fontSize: '18px',
-              fontWeight: '600',
+              width: '100%', padding: '16px', fontSize: '17px', fontWeight: '600',
               color: 'white',
-              background: podeProcessar && !processando ? 'linear-gradient(135deg, #5B9BD5 0%, #2C3E50 100%)' : '#CCCCCC',
-              border: 'none',
-              borderRadius: '12px',
+              background: podeProcessar && !processando
+                ? 'linear-gradient(135deg, #5B9BD5 0%, #2C3E50 100%)'
+                : '#CCCCCC',
+              border: 'none', borderRadius: '12px',
               cursor: podeProcessar && !processando ? 'pointer' : 'not-allowed',
               transition: 'all 0.3s',
               boxShadow: podeProcessar && !processando ? '0 4px 12px rgba(91, 155, 213, 0.3)' : 'none',
-              marginBottom: '20px'
-            }}
-            onMouseEnter={(e) => {
-              if (podeProcessar && !processando) {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 6px 16px rgba(91, 155, 213, 0.4)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = podeProcessar && !processando ? '0 4px 12px rgba(91, 155, 213, 0.3)' : 'none';
+              marginBottom: '8px'
             }}
           >
-            {processando ? '⏳ Processando...' : '📨 Gerar Round de Hoje'}
+            {processando ? `⏳ Processando... ${progresso}%` : '🚀 Gerar Round de Hoje'}
           </button>
 
-          {/* Barra de Progresso */}
-          {processando && (
-            <div style={{ marginBottom: '20px' }}>
-              <div style={{
-                width: '100%',
-                height: '8px',
-                background: '#E0E0E0',
-                borderRadius: '4px',
-                overflow: 'hidden'
-              }}>
-                <div style={{
-                  width: `${progresso}%`,
-                  height: '100%',
-                  background: 'linear-gradient(90deg, #5B9BD5 0%, #F4A582 100%)',
-                  transition: 'width 0.3s'
-                }} />
-              </div>
-              <p style={{
-                marginTop: '8px',
-                fontSize: '14px',
-                color: '#2C3E50',
-                textAlign: 'center'
-              }}>
-                {mensagemProgresso}
-              </p>
-            </div>
-          )}
-
-          {/* Mensagem de Erro */}
-          {erro && (
-            <div style={{
-              padding: '16px',
-              background: '#FEE',
-              border: '2px solid #F88',
-              borderRadius: '8px',
-              color: '#C00',
-              marginBottom: '20px'
-            }}>
-              <strong>⚠️ Erro no processamento:</strong> {erro}
-            </div>
-          )}
-
-          {/* Mensagem de Sucesso */}
-          {sucesso && (
-            <div style={{
-              padding: '16px',
-              background: '#EFE',
-              border: '2px solid #8F8',
-              borderRadius: '8px',
-              color: '#080',
-              marginBottom: '20px',
-              textAlign: 'center'
-            }}>
-              <strong>✅ Round gerado com sucesso!</strong>
-              <br />
-              <small>O download do arquivo .docx iniciará automaticamente.</small>
-            </div>
+          {!podeProcessar && !processando && (
+            <p style={{ textAlign: 'center', fontSize: '12px', color: '#999', margin: '4px 0 0 0' }}>
+              {!cerebrasKey || !deepseekKey || !groqKey
+                ? 'Configure as API Keys para habilitar a geração'
+                : !docAnterior
+                  ? 'Adicione o documento do round anterior'
+                  : 'Adicione a transcrição ou áudio do dia'}
+            </p>
           )}
         </div>
 
         {/* Botões de Ação */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '16px',
-          marginBottom: '20px'
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: '12px', marginBottom: '20px'
         }}>
-          {/* Botão Microfone */}
           <button
             onClick={gravando ? pararGravacao : iniciarGravacao}
             style={{
-              padding: '16px',
-              fontSize: '16px',
-              fontWeight: '600',
-              color: 'white',
-              background: gravando ? 'linear-gradient(135deg, #F44336 0%, #D32F2F 100%)' : 'linear-gradient(135deg, #F4A582 0%, #E57373 100%)',
-              border: 'none',
-              borderRadius: '12px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              transition: 'all 0.3s',
+              padding: '14px', fontSize: '14px', fontWeight: '600', color: 'white',
+              background: gravando
+                ? 'linear-gradient(135deg, #F44336 0%, #D32F2F 100%)'
+                : 'linear-gradient(135deg, #F4A582 0%, #E57373 100%)',
+              border: 'none', borderRadius: '10px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
               boxShadow: '0 4px 12px rgba(244, 165, 130, 0.3)'
             }}
           >
-            {gravando ? <MicOff size={20} /> : <Mic size={20} />}
+            {gravando ? <MicOff size={18} /> : <Mic size={18} />}
             {gravando ? 'Parar Gravação' : 'Gravar Feedback'}
           </button>
 
-          {/* Botão Histórico */}
           <button
-            onClick={() => setMostrarHistorico(!mostrarHistorico)}
+            onClick={() => { setMostrarHistorico(!mostrarHistorico); if (!mostrarHistorico) carregarHistorico(); }}
             style={{
-              padding: '16px',
-              fontSize: '16px',
-              fontWeight: '600',
-              color: '#2C3E50',
-              background: 'white',
-              border: '2px solid #5B9BD5',
-              borderRadius: '12px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              transition: 'all 0.3s'
+              padding: '14px', fontSize: '14px', fontWeight: '600', color: '#2C3E50',
+              background: 'white', border: '2px solid #5B9BD5', borderRadius: '10px',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
             }}
           >
-            <History size={20} />
+            <History size={18} />
             Histórico ({historico.length})
           </button>
 
-          {/* Botão Regras */}
           <button
             onClick={() => setMostrarRegras(!mostrarRegras)}
             style={{
-              padding: '16px',
-              fontSize: '16px',
-              fontWeight: '600',
-              color: '#2C3E50',
-              background: 'white',
-              border: '2px solid #5B9BD5',
-              borderRadius: '12px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              transition: 'all 0.3s'
+              padding: '14px', fontSize: '14px', fontWeight: '600', color: '#2C3E50',
+              background: 'white', border: '2px solid #5B9BD5', borderRadius: '10px',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
             }}
           >
-            <BookOpen size={20} />
+            <BookOpen size={18} />
             Regras ({regrasAprendidas.length})
           </button>
         </div>
@@ -595,11 +585,8 @@ export default function RoundCerebrasGemini() {
         {/* Preview de Áudio Gravado */}
         {audioBlob && (
           <div style={{
-            background: 'white',
-            borderRadius: '12px',
-            padding: '20px',
-            marginBottom: '20px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+            background: 'white', borderRadius: '12px', padding: '20px',
+            marginBottom: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
           }}>
             <h3 style={{ margin: '0 0 16px 0', color: '#2C3E50' }}>🎤 Feedback Gravado</h3>
             <audio controls src={URL.createObjectURL(audioBlob)} style={{ width: '100%', marginBottom: '16px' }} />
@@ -607,15 +594,9 @@ export default function RoundCerebrasGemini() {
               <button
                 onClick={enviarFeedback}
                 style={{
-                  flex: 1,
-                  padding: '12px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  color: 'white',
+                  flex: 1, padding: '10px', fontSize: '14px', fontWeight: '600', color: 'white',
                   background: 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer'
+                  border: 'none', borderRadius: '8px', cursor: 'pointer'
                 }}
               >
                 📤 Enviar Feedback
@@ -623,14 +604,8 @@ export default function RoundCerebrasGemini() {
               <button
                 onClick={() => setAudioBlob(null)}
                 style={{
-                  padding: '12px 20px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  color: '#F44336',
-                  background: 'white',
-                  border: '2px solid #F44336',
-                  borderRadius: '8px',
-                  cursor: 'pointer'
+                  padding: '10px 16px', fontSize: '14px', color: '#F44336',
+                  background: 'white', border: '2px solid #F44336', borderRadius: '8px', cursor: 'pointer'
                 }}
               >
                 <X size={16} />
@@ -642,41 +617,57 @@ export default function RoundCerebrasGemini() {
         {/* Modal Histórico */}
         {mostrarHistorico && (
           <div style={{
-            background: 'white',
-            borderRadius: '12px',
-            padding: '24px',
-            marginBottom: '20px',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.15)'
+            background: 'white', borderRadius: '12px', padding: '24px',
+            marginBottom: '20px', boxShadow: '0 8px 32px rgba(0,0,0,0.15)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ margin: 0, color: '#2C3E50' }}>📊 Histórico de Rounds</h3>
-              <button
-                onClick={() => setMostrarHistorico(false)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '4px'
-                }}
-              >
-                <X size={24} color="#666" />
+              <button onClick={() => setMostrarHistorico(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={22} color="#666" />
               </button>
             </div>
             <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-              {historico.length === 0 ? (
+              {carregandoHistorico ? (
+                <p style={{ color: '#666', textAlign: 'center' }}>Carregando...</p>
+              ) : historico.length === 0 ? (
                 <p style={{ color: '#666', textAlign: 'center' }}>Nenhum round gerado ainda.</p>
               ) : (
                 historico.map((item) => (
                   <div key={item.id} style={{
-                    padding: '12px',
-                    border: '1px solid #E0E0E0',
-                    borderRadius: '8px',
-                    marginBottom: '8px'
+                    padding: '12px 14px', border: '1px solid #E0E0E0', borderRadius: '8px',
+                    marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
                   }}>
-                    <div style={{ fontWeight: '600', color: '#2C3E50' }}>{item.nome_arquivo}</div>
-                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                      {new Date(item.data_geracao).toLocaleString('pt-BR')}
+                    <div>
+                      <div style={{ fontWeight: '600', color: '#2C3E50', fontSize: '14px' }}>{item.round_name || 'Round'}</div>
+                      <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>
+                        {new Date(item.round_date).toLocaleDateString('pt-BR')} • {item.llm_provider || 'IA'}
+                      </div>
+                      {item.preview && (
+                        <div style={{ fontSize: '11px', color: '#AAA', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '400px' }}>
+                          {item.preview.slice(0, 80)}...
+                        </div>
+                      )}
                     </div>
+                    <button
+                      onClick={async () => {
+                        const token = localStorage.getItem('access_token');
+                        const res = await fetch(`/api/rounds/history/${item.id}`, { headers: { Authorization: `Bearer ${token}` } });
+                        if (res.ok) {
+                          const full = await res.json();
+                          if (full.generated_document) {
+                            setDocumentoGerado(full.generated_document);
+                            baixarDocx(full.generated_document);
+                          }
+                        }
+                      }}
+                      style={{
+                        padding: '6px 12px', background: '#5B9BD5', color: 'white',
+                        border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px',
+                        display: 'flex', alignItems: 'center', gap: '4px'
+                      }}
+                    >
+                      <Download size={12} /> Baixar
+                    </button>
                   </div>
                 ))
               )}
@@ -687,24 +678,13 @@ export default function RoundCerebrasGemini() {
         {/* Modal Regras */}
         {mostrarRegras && (
           <div style={{
-            background: 'white',
-            borderRadius: '12px',
-            padding: '24px',
-            marginBottom: '20px',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.15)'
+            background: 'white', borderRadius: '12px', padding: '24px',
+            marginBottom: '20px', boxShadow: '0 8px 32px rgba(0,0,0,0.15)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ margin: 0, color: '#2C3E50' }}>📚 Regras Aprendidas</h3>
-              <button
-                onClick={() => setMostrarRegras(false)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '4px'
-                }}
-              >
-                <X size={24} color="#666" />
+              <button onClick={() => setMostrarRegras(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={22} color="#666" />
               </button>
             </div>
             <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
@@ -713,33 +693,20 @@ export default function RoundCerebrasGemini() {
               ) : (
                 regrasAprendidas.map((regra) => (
                   <div key={regra.id} style={{
-                    padding: '12px',
-                    border: '1px solid #E0E0E0',
-                    borderRadius: '8px',
-                    marginBottom: '8px'
+                    padding: '12px', border: '1px solid #E0E0E0', borderRadius: '8px', marginBottom: '8px'
                   }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                      <div style={{ flex: 1 }}>
-                        <span style={{
-                          display: 'inline-block',
-                          padding: '2px 8px',
-                          background: '#5B9BD5',
-                          color: 'white',
-                          borderRadius: '4px',
-                          fontSize: '11px',
-                          fontWeight: '600',
-                          marginBottom: '8px'
-                        }}>
-                          {regra.tipo.toUpperCase()}
-                        </span>
-                        <div style={{ color: '#2C3E50', fontSize: '14px' }}>{regra.descricao}</div>
-                        {regra.exemplo && (
-                          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px', fontStyle: 'italic' }}>
-                            Ex: {regra.exemplo}
-                          </div>
-                        )}
+                    <span style={{
+                      display: 'inline-block', padding: '2px 8px', background: '#5B9BD5',
+                      color: 'white', borderRadius: '4px', fontSize: '11px', fontWeight: '600', marginBottom: '6px'
+                    }}>
+                      {regra.tipo.toUpperCase()}
+                    </span>
+                    <div style={{ color: '#2C3E50', fontSize: '14px' }}>{regra.descricao}</div>
+                    {regra.exemplo && (
+                      <div style={{ fontSize: '12px', color: '#666', marginTop: '4px', fontStyle: 'italic' }}>
+                        Ex: {regra.exemplo}
                       </div>
-                    </div>
+                    )}
                   </div>
                 ))
               )}
@@ -748,31 +715,16 @@ export default function RoundCerebrasGemini() {
         )}
 
         {/* Footer */}
-        <div style={{
-          textAlign: 'center',
-          color: '#2C3E50',
-          fontSize: '14px',
-          opacity: 0.7,
-          marginTop: '40px'
-        }}>
-          <p style={{ margin: '0 0 8px 0', fontWeight: 500 }}>
-            Nexo Soluções Digitais
-          </p>
-          <p style={{ margin: 0, fontSize: '12px' }}>
-            App Rounder • Gerador Inteligente de Rounds Médicos
-          </p>
+        <div style={{ textAlign: 'center', color: '#2C3E50', fontSize: '13px', opacity: 0.7, marginTop: '32px' }}>
+          <p style={{ margin: '0 0 4px 0', fontWeight: 500 }}>Nexo Soluções Digitais</p>
+          <p style={{ margin: 0, fontSize: '12px' }}>App Rounder • Gerador Inteligente de Rounds Médicos</p>
         </div>
       </div>
 
-      {/* Modal de Perfil */}
-      {mostrarPerfil && (
-        <UserProfile onClose={() => setMostrarPerfil(false)} />
-      )}
-
-      {/* Modal de Configuração de APIs */}
-      {mostrarConfigAPIs && (
-        <APIManager onClose={() => setMostrarConfigAPIs(false)} />
-      )}
+      {/* Modais */}
+      {mostrarPerfil && <UserProfile onClose={() => setMostrarPerfil(false)} />}
+      {mostrarConfigAPIs && <APIManager onClose={() => setMostrarConfigAPIs(false)} />}
+      {mostrarContexto && <ClinicalContextPanel onClose={() => setMostrarContexto(false)} />}
     </div>
   );
 }

@@ -12,6 +12,9 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool, query } from './db.js';
 import { Resend } from 'resend';
+import multer from 'multer';
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const resend = new Resend(process.env.RESEND_API_KEY || '');
 const APP_URL = process.env.APP_URL || 'https://app-rounder.vercel.app';
@@ -603,6 +606,350 @@ app.get('/api/health', async (_req: any, res: any) => {
     return res.json({ status: 'ok', database: 'neon-connected', timestamp: new Date().toISOString() });
   } catch (error: any) {
     return res.status(500).json({ status: 'error', database: 'disconnected', error: error.message });
+  }
+});
+
+// ============================================================
+// ROTA: EXTRAÇÃO DE TEXTO DE ARQUIVOS (PDF, TXT, etc.)
+// ============================================================
+
+app.post('/api/extract-text', authenticateToken, upload.single('file'), async (req: any, res: any) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+    const { originalname, buffer, mimetype } = req.file;
+    const ext = originalname.split('.').pop()?.toLowerCase() || '';
+
+    // PDF
+    if (ext === 'pdf' || mimetype === 'application/pdf') {
+      try {
+        const pdfParse = (await import('pdf-parse')).default;
+        const data = await pdfParse(buffer);
+        return res.json({ text: data.text, pages: data.numpages, source: originalname });
+      } catch (pdfErr: any) {
+        return res.status(500).json({ error: `Erro ao processar PDF: ${pdfErr.message}` });
+      }
+    }
+
+    // Arquivos de texto simples: txt, srt, vtt, md, csv, rtf
+    const textExts = ['txt', 'srt', 'vtt', 'md', 'csv', 'rtf', 'text'];
+    if (textExts.includes(ext) || mimetype.startsWith('text/')) {
+      const text = buffer.toString('utf-8');
+      return res.json({ text, source: originalname });
+    }
+
+    return res.status(400).json({ error: `Formato não suportado: .${ext}` });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+// ROTAS RAG CLÍNICO: HISTÓRICO DE ROUNDS
+// ============================================================
+
+// Salvar round gerado no histórico
+app.post('/api/rounds/history', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { round_date, round_name, transcription_text, generated_document, raw_input_text, llm_provider, tokens_used } = req.body;
+    const result = await query(
+      `INSERT INTO round_history (user_id, round_date, round_name, transcription_text, generated_document, raw_input_text, llm_provider, tokens_used)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [req.userId, round_date || new Date().toISOString().split('T')[0], round_name || '', transcription_text || '', generated_document || '', raw_input_text || '', llm_provider || '', tokens_used || 0]
+    );
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Listar histórico de rounds
+app.get('/api/rounds/history', authenticateToken, async (req: any, res: any) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 30;
+    const result = await query(
+      `SELECT id, round_date, round_name, processing_status, llm_provider, tokens_used, created_at,
+       LEFT(generated_document, 500) as preview
+       FROM round_history WHERE user_id = $1 ORDER BY round_date DESC, created_at DESC LIMIT $2`,
+      [req.userId, limit]
+    );
+    return res.json(result.rows);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Buscar round específico com conteúdo completo
+app.get('/api/rounds/history/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query(
+      'SELECT * FROM round_history WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Round não encontrado' });
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Deletar round do histórico
+app.delete('/api/rounds/history/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    await query('DELETE FROM round_history WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+// ROTAS RAG CLÍNICO: CONTEXTO DE PACIENTES/LEITOS
+// ============================================================
+
+// Listar todos os pacientes/leitos ativos
+app.get('/api/clinical/patients', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query(
+      `SELECT * FROM clinical_patients WHERE user_id = $1 ORDER BY bed_number ASC`,
+      [req.userId]
+    );
+    return res.json(result.rows);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Criar ou atualizar paciente/leito
+app.post('/api/clinical/patients', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { bed_number, patient_name, admission_date, main_diagnosis, current_status, pending_exams, active_antibiotics, key_notes, is_active } = req.body;
+    // Verificar se já existe leito
+    const existing = await query(
+      'SELECT id FROM clinical_patients WHERE user_id = $1 AND bed_number = $2',
+      [req.userId, bed_number]
+    );
+    let result;
+    if (existing.rows.length > 0) {
+      result = await query(
+        `UPDATE clinical_patients SET patient_name=$1, admission_date=$2, main_diagnosis=$3, current_status=$4,
+         pending_exams=$5, active_antibiotics=$6, key_notes=$7, is_active=$8, updated_at=NOW(), last_updated=CURRENT_DATE
+         WHERE user_id=$9 AND bed_number=$10 RETURNING *`,
+        [patient_name, admission_date, main_diagnosis, current_status, pending_exams, active_antibiotics, key_notes, is_active !== false, req.userId, bed_number]
+      );
+    } else {
+      result = await query(
+        `INSERT INTO clinical_patients (user_id, bed_number, patient_name, admission_date, main_diagnosis, current_status, pending_exams, active_antibiotics, key_notes, is_active, last_updated)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_DATE) RETURNING *`,
+        [req.userId, bed_number, patient_name, admission_date, main_diagnosis, current_status, pending_exams, active_antibiotics, key_notes, is_active !== false]
+      );
+    }
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Dar alta / marcar óbito / transferência em paciente
+app.patch('/api/clinical/patients/:id/discharge', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { discharge_type } = req.body; // 'alta', 'obito', 'transferencia'
+    const result = await query(
+      `UPDATE clinical_patients SET discharge_type=$1, discharge_date=CURRENT_DATE, is_active=false, updated_at=NOW()
+       WHERE id=$2 AND user_id=$3 RETURNING *`,
+      [discharge_type || 'alta', req.params.id, req.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Paciente não encontrado' });
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Deletar paciente
+app.delete('/api/clinical/patients/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    await query('DELETE FROM clinical_patients WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+// ROTAS RAG: SNAPSHOTS DE LEITO POR ROUND
+// ============================================================
+
+// Salvar snapshots de leito após round gerado
+app.post('/api/clinical/snapshots', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { round_id, round_date, snapshots } = req.body;
+    // snapshots = array de { bed_number, patient_name, patient_status, content_summary, new_exams, new_antibiotics, new_procedures, pending_items }
+    const inserted = [];
+    for (const snap of (snapshots || [])) {
+      const r = await query(
+        `INSERT INTO bed_round_snapshots (user_id, round_id, round_date, bed_number, patient_name, patient_status, content_summary, new_exams, new_antibiotics, new_procedures, pending_items)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+        [req.userId, round_id, round_date, snap.bed_number, snap.patient_name, snap.patient_status || 'active', snap.content_summary, snap.new_exams, snap.new_antibiotics, snap.new_procedures, snap.pending_items]
+      );
+      inserted.push(r.rows[0]);
+    }
+    return res.json(inserted);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Buscar contexto RAG para um leito específico (últimos N rounds)
+app.get('/api/clinical/context/:bed', authenticateToken, async (req: any, res: any) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 5;
+    const result = await query(
+      `SELECT * FROM bed_round_snapshots WHERE user_id = $1 AND bed_number = $2
+       ORDER BY round_date DESC LIMIT $3`,
+      [req.userId, req.params.bed, limit]
+    );
+    return res.json(result.rows);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Buscar contexto RAG completo (todos os leitos, últimos 3 rounds) para injetar no prompt
+app.get('/api/clinical/rag-context', authenticateToken, async (req: any, res: any) => {
+  try {
+    // Buscar pacientes ativos
+    const patients = await query(
+      `SELECT bed_number, patient_name, main_diagnosis, current_status, pending_exams, active_antibiotics, key_notes, last_updated
+       FROM clinical_patients WHERE user_id = $1 AND is_active = true ORDER BY bed_number`,
+      [req.userId]
+    );
+    // Buscar últimos 3 rounds
+    const recentRounds = await query(
+      `SELECT id, round_date, round_name FROM round_history WHERE user_id = $1 ORDER BY round_date DESC LIMIT 3`,
+      [req.userId]
+    );
+    // Buscar snapshots dos últimos 3 rounds
+    const snapshots = await query(
+      `SELECT brs.* FROM bed_round_snapshots brs
+       JOIN round_history rh ON brs.round_id = rh.id
+       WHERE brs.user_id = $1
+       ORDER BY brs.round_date DESC LIMIT 60`,
+      [req.userId]
+    );
+    // Buscar pendências abertas
+    const pending = await query(
+      `SELECT bed_number, item_type, description, requested_date
+       FROM clinical_pending_items WHERE user_id = $1 AND is_resolved = false
+       ORDER BY requested_date DESC`,
+      [req.userId]
+    );
+    return res.json({
+      active_patients: patients.rows,
+      recent_rounds: recentRounds.rows,
+      bed_snapshots: snapshots.rows,
+      pending_items: pending.rows
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+// ROTAS RAG: PENDÊNCIAS CLÍNICAS
+// ============================================================
+
+// Listar pendências
+app.get('/api/clinical/pending', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query(
+      `SELECT * FROM clinical_pending_items WHERE user_id = $1 ORDER BY is_resolved ASC, requested_date DESC`,
+      [req.userId]
+    );
+    return res.json(result.rows);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Adicionar pendência
+app.post('/api/clinical/pending', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { bed_number, item_type, description, requested_date } = req.body;
+    const result = await query(
+      `INSERT INTO clinical_pending_items (user_id, bed_number, item_type, description, requested_date)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.userId, bed_number, item_type || 'exam', description, requested_date || new Date().toISOString().split('T')[0]]
+    );
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// PATCH pendência (alias sem sufixo)
+app.patch('/api/clinical/pending/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { resolved, resolved_date } = req.body;
+    const result = await query(
+      `UPDATE clinical_pending_items SET is_resolved=$3, resolved_date=$4 WHERE id=$1 AND user_id=$2 RETURNING *`,
+      [req.params.id, req.userId, resolved ?? false, resolved_date || null]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Pendência não encontrada' });
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Resolver pendência
+app.patch('/api/clinical/pending/:id/resolve', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query(
+      `UPDATE clinical_pending_items SET is_resolved=true, resolved_date=CURRENT_DATE
+       WHERE id=$1 AND user_id=$2 RETURNING *`,
+      [req.params.id, req.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Pendência não encontrada' });
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// PATCH paciente (atualizar status)
+app.patch('/api/clinical/patients/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { current_status, patient_name, main_diagnosis, pending_exams, active_antibiotics, relevant_notes } = req.body;
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+    if (current_status !== undefined) { fields.push(`current_status=$${idx++}`); values.push(current_status); }
+    if (patient_name !== undefined) { fields.push(`patient_name=$${idx++}`); values.push(patient_name); }
+    if (main_diagnosis !== undefined) { fields.push(`main_diagnosis=$${idx++}`); values.push(main_diagnosis); }
+    if (pending_exams !== undefined) { fields.push(`pending_exams=$${idx++}`); values.push(pending_exams); }
+    if (active_antibiotics !== undefined) { fields.push(`active_antibiotics=$${idx++}`); values.push(active_antibiotics); }
+    if (relevant_notes !== undefined) { fields.push(`key_notes=$${idx++}`); values.push(relevant_notes); }
+    if (fields.length === 0) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    fields.push(`last_updated=NOW()`);
+    values.push(req.params.id, req.userId);
+    const result = await query(
+      `UPDATE clinical_patients SET ${fields.join(', ')} WHERE id=$${idx} AND user_id=$${idx + 1} RETURNING *`,
+      values
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Paciente não encontrado' });
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Deletar pendência
+app.delete('/api/clinical/pending/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    await query('DELETE FROM clinical_pending_items WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
   }
 });
 
