@@ -313,6 +313,43 @@ export default function UniversalInputArea({
               >
                 <Upload size={13} /> DOCX
               </button>
+
+              {/* Botão Colar via Clipboard API — funciona no iOS 16.4+ e Android */}
+              <button
+                onClick={async () => {
+                  try {
+                    if (!navigator.clipboard?.readText) {
+                      // Fallback: focar o textarea para o usuário colar manualmente
+                      textAreaRef.current?.focus();
+                      setError('Toque no campo de texto acima e segure para colar.');
+                      setTimeout(() => setError(''), 4000);
+                      return;
+                    }
+                    const text = await navigator.clipboard.readText();
+                    if (text && text.trim().length > 0) {
+                      onTextReady(text, 'Texto colado');
+                      setMode('typing');
+                    } else {
+                      setError('Área de transferência vazia ou sem texto.');
+                      setTimeout(() => setError(''), 3000);
+                    }
+                  } catch (err: any) {
+                    // Permissão negada ou API indisponível — focar textarea
+                    textAreaRef.current?.focus();
+                    setError('Toque no campo acima e segure o dedo para colar.');
+                    setTimeout(() => setError(''), 4000);
+                  }
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '5px',
+                  padding: '6px 12px', background: '#FFF8E1',
+                  border: '1px solid #F39C12', borderRadius: '6px',
+                  cursor: 'pointer', fontSize: '12px', color: '#E67E22', fontWeight: '700',
+                  touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent'
+                } as React.CSSProperties}
+              >
+                <Clipboard size={13} /> Colar
+              </button>
             </div>
           </>
         )}
@@ -326,7 +363,7 @@ export default function UniversalInputArea({
       }}>
         <Clipboard size={14} color="#2980B9" style={{ flexShrink: 0, marginTop: '1px' }} />
         <div style={{ fontSize: '12px', color: '#2980B9', lineHeight: '1.5' }}>
-          <strong>Como colar no celular:</strong> No app de transcrição, toque em <strong>"Copiar"</strong>. Depois toque no campo acima, <strong>segure o dedo</strong> e escolha <strong>"Colar"</strong> no menu.
+          <strong>Como colar no celular:</strong> Copie o texto no app de transcrição, depois toque em <strong>"Colar"</strong> acima — ou toque no campo de texto, segure e escolha <strong>"Colar"</strong> no menu.
         </div>
       </div>
 

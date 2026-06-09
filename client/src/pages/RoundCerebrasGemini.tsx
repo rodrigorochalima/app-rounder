@@ -282,21 +282,71 @@ export default function RoundCerebrasGemini() {
     return ctx;
   };
 
-  // Baixar documento .docx
+  // Baixar documento .docx com dados reais do médico e instituição
   const baixarDocx = async (doc?: string) => {
     const docToDownload = doc || documentoGerado;
     if (!docToDownload) return;
     try {
+      const token = localStorage.getItem('access_token');
+      const headers = { Authorization: `Bearer ${token}` };
+
+      // Buscar perfil do médico
+      let doctorOpts: any = {};
+      try {
+        const drRes = await fetch('/api/doctor-profile', { headers });
+        if (drRes.ok) {
+          const dr = await drRes.json();
+          if (dr) {
+            doctorOpts = {
+              doctorName: dr.full_name,
+              doctorCrm: dr.crm,
+              doctorCrmState: dr.crm_state,
+              doctorSpecialty: dr.specialty,
+              doctorRqe: dr.rqe,
+              doctorPhone: dr.phone,
+              doctorEmail: dr.email,
+              doctorSignatureBase64: dr.signature_base64,
+              doctorFooterText: dr.footer_text,
+              showDoctorCrm: dr.show_crm,
+              showDoctorSpecialty: dr.show_specialty,
+              showDoctorPhone: dr.show_phone,
+              showDoctorEmail: dr.show_email,
+            };
+          }
+        }
+      } catch (_) {}
+
+      // Buscar instituição padrão
+      let instOpts: any = {};
+      try {
+        const instRes = await fetch('/api/institutions', { headers });
+        if (instRes.ok) {
+          const insts = await instRes.json();
+          const defaultInst = insts.find((i: any) => i.is_default) || insts[0];
+          if (defaultInst) {
+            instOpts = {
+              instituicao: defaultInst.name,
+              institutionLogoBase64: defaultInst.logo_base64,
+              institutionHeaderColor: defaultInst.header_color,
+              institutionHeaderTextColor: defaultInst.header_text_color,
+              institutionCity: defaultInst.city,
+              institutionState: defaultInst.state,
+            };
+          }
+        }
+      } catch (_) {}
+
       const nomeArquivo = DocxGenerator.gerarNomeArquivo('Round');
       await DocxGenerator.gerar(
         docToDownload,
         nomeArquivo,
         {
           titulo: 'Round de Hoje',
-          instituicao: 'Hospital',
           data: new Date().toLocaleDateString('pt-BR', {
             weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-          })
+          }),
+          ...instOpts,
+          ...doctorOpts,
         }
       );
     } catch (error: any) {
