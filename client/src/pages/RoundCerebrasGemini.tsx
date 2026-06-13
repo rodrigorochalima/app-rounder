@@ -65,6 +65,71 @@ export default function RoundCerebrasGemini() {
     if (savedGroq) setGroqKey(savedGroq);
     carregarRegras();
     carregarHistorico();
+
+    // ---- Web Share Target: processar arquivo recebido via Share Sheet do iOS/Android ----
+    const processSharedData = async (data: any) => {
+      if (!data) return;
+      try {
+        if (data.fileData && data.fileData.length > 0) {
+          const uint8 = new Uint8Array(data.fileData);
+          const blob = new Blob([uint8], { type: data.fileType || 'application/octet-stream' });
+          const file = new File([blob], data.fileName || 'arquivo_compartilhado', { type: data.fileType || 'application/octet-stream' });
+          if (data.fileType === 'application/pdf' || data.fileName?.toLowerCase().endsWith('.pdf')) {
+            const token = localStorage.getItem('access_token');
+            const formData = new FormData();
+            formData.append('file', file);
+            const res = await fetch('/api/extract-text', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+              body: formData
+            });
+            if (res.ok) {
+              const result = await res.json();
+              setTranscricaoTexto(result.text);
+              setTranscricaoFileName(data.fileName || 'PDF compartilhado');
+            }
+          } else if (data.fileType?.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|aac)$/i.test(data.fileName || '')) {
+            setTranscricaoAudio(file);
+            setTranscricaoFileName(data.fileName || 'Áudio compartilhado');
+          } else {
+            const text = await blob.text();
+            setTranscricaoTexto(text);
+            setTranscricaoFileName(data.fileName || 'Arquivo compartilhado');
+          }
+        } else if (data.text && data.text.trim().length > 0) {
+          setTranscricaoTexto(data.text);
+          setTranscricaoFileName('Texto compartilhado');
+        }
+      } catch (err) {
+        console.error('Erro ao processar arquivo compartilhado:', err);
+      }
+    };
+
+    // Verificar se veio de um share target (?shared=1)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('shared') === '1') {
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = (e: MessageEvent) => {
+          if (e.data?.type === 'PENDING_SHARE_DATA') processSharedData(e.data.data);
+        };
+        navigator.serviceWorker.controller.postMessage({ type: 'GET_PENDING_SHARE' }, [channel.port2]);
+      }
+      window.history.replaceState({}, '', '/');
+    }
+
+    // Listener para mensagens diretas do SW (quando o app já está aberto)
+    const handleSWMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'SHARE_TARGET_RECEIVED') processSharedData(event.data.data);
+    };
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleSWMessage);
+    }
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleSWMessage);
+      }
+    };
   }, []);
 
   const carregarRegras = async () => {

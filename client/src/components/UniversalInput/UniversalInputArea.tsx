@@ -355,15 +355,18 @@ export default function UniversalInputArea({
         )}
       </div>
 
-      {/* Dica visual */}
+      {/* Dica visual iOS */}
       <div style={{
         marginTop: '8px', padding: '10px 12px',
         background: '#EBF5FB', borderRadius: '8px',
         display: 'flex', alignItems: 'flex-start', gap: '8px'
       }}>
-        <Clipboard size={14} color="#2980B9" style={{ flexShrink: 0, marginTop: '1px' }} />
-        <div style={{ fontSize: '12px', color: '#2980B9', lineHeight: '1.5' }}>
-          <strong>Como colar no celular:</strong> Copie o texto no app de transcrição, depois toque em <strong>"Colar"</strong> acima — ou toque no campo de texto, segure e escolha <strong>"Colar"</strong> no menu.
+        <Clipboard size={14} color="#2980B9" style={{ flexShrink: 0, marginTop: '2px' }} />
+        <div style={{ fontSize: '12px', color: '#2980B9', lineHeight: '1.7' }}>
+          <strong>Como importar no celular:</strong><br />
+          • <strong>PDF / Áudio:</strong> No app de origem, toque em <strong>Compartilhar ↗</strong> e escolha <strong>"Rounder"</strong><br />
+          • <strong>Texto copiado:</strong> Toque no campo acima, segure e escolha <strong>"Colar"</strong><br />
+          • <strong>Arquivo salvo:</strong> Use o botão <strong>TXT / PDF / SRT</strong> acima
         </div>
       </div>
 
