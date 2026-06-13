@@ -1,18 +1,15 @@
 /**
  * UniversalInputArea — Área de entrada universal de transcrição
- * 
- * Solução iOS: textarea DIRETAMENTE visível e editável, sem div pai com onPaste.
- * O iOS Safari só mostra o menu "Colar" quando o elemento focado é um input/textarea
- * nativo sem interceptação de eventos nos elementos pai.
- * 
- * Suporta:
- * - Colar texto (Ctrl+V / segurar → Colar no iOS/Android)
- * - Arrastar e soltar arquivos (desktop)
- * - Selecionar arquivos: TXT, PDF, SRT, VTT, RTF, MD, DOCX, MP3, WAV, WEBM
- * - Digitar texto diretamente
+ *
+ * Estratégia iOS:
+ * - Botão grande "📎 Importar PDF / Áudio" como primeiro elemento (mais fácil de tocar)
+ * - Input de arquivo com accept="*" para aceitar qualquer arquivo no iOS
+ * - Textarea nativo sem interceptação de eventos no pai (para o menu "Colar" funcionar)
+ * - Botão "Colar" tenta clipboard.read() (arquivos) e clipboard.readText() (texto)
+ * - Drag & drop no wrapper para desktop
  */
 import { useState, useRef, useCallback } from 'react';
-import { Upload, Clipboard, FileText, Mic, X, CheckCircle, AlertCircle } from 'lucide-react';
+import { Upload, Clipboard, FileText, Mic, X, CheckCircle, AlertCircle, FolderOpen } from 'lucide-react';
 import mammoth from 'mammoth';
 
 interface UniversalInputAreaProps {
@@ -37,9 +34,9 @@ export default function UniversalInputArea({
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMsg, setProcessingMsg] = useState('');
   const [error, setError] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Input único com accept="*/*" — no iOS abre o seletor nativo com todas as opções
+  const anyFileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
-  const docxInputRef = useRef<HTMLInputElement>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
   const isAudioFile = (file: File) =>
@@ -112,11 +109,8 @@ export default function UniversalInputArea({
     }
   }, [onTextReady, onFileReady]);
 
-  // Drag & Drop — apenas na div wrapper, NÃO no textarea
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
+  // Drag & Drop
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
   const handleDragLeave = () => setIsDragging(false);
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -132,15 +126,13 @@ export default function UniversalInputArea({
   };
 
   // Paste no textarea — comportamento nativo iOS
-  // NÃO usar e.preventDefault() para não bloquear o menu nativo
   const handleTextareaPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const text = e.clipboardData?.getData('text/plain');
     if (text && text.trim().length > 0) {
       // Deixar o textarea receber o texto normalmente via onChange
-      // Não chamar e.preventDefault() aqui — iOS precisa do comportamento padrão
       return;
     }
-    // Verificar arquivos colados
+    // Verificar arquivos colados (funciona no desktop e alguns Android)
     const files = e.clipboardData?.files;
     if (files && files.length > 0) {
       e.preventDefault();
@@ -148,7 +140,75 @@ export default function UniversalInputArea({
     }
   };
 
-  // onChange do textarea — captura texto digitado E colado
+  // Botão "Colar" — tenta clipboard.read() para arquivos, depois clipboard.readText() para texto
+  const handlePasteButton = async () => {
+    setError('');
+    try {
+      // Tentar ler arquivos da área de transferência (iOS 17+, Chrome Android)
+      if (navigator.clipboard && 'read' in navigator.clipboard) {
+        try {
+          const clipboardItems = await (navigator.clipboard as any).read();
+          for (const item of clipboardItems) {
+            // Verificar se tem PDF
+            if (item.types.includes('application/pdf')) {
+              const blob = await item.getType('application/pdf');
+              const file = new File([blob], 'documento_colado.pdf', { type: 'application/pdf' });
+              await processFile(file);
+              return;
+            }
+            // Verificar outros tipos de arquivo
+            for (const type of item.types) {
+              if (type.startsWith('image/') || type === 'text/html') continue;
+              if (type !== 'text/plain') {
+                try {
+                  const blob = await item.getType(type);
+                  const ext = type.split('/')[1] || 'bin';
+                  const file = new File([blob], `arquivo_colado.${ext}`, { type });
+                  await processFile(file);
+                  return;
+                } catch {}
+              }
+            }
+            // Tentar texto
+            if (item.types.includes('text/plain')) {
+              const blob = await item.getType('text/plain');
+              const text = await blob.text();
+              if (text.trim().length > 0) {
+                onTextReady(text, 'Texto colado');
+                setMode('typing');
+                return;
+              }
+            }
+          }
+          setError('Área de transferência vazia. Copie o conteúdo primeiro.');
+          setTimeout(() => setError(''), 4000);
+          return;
+        } catch (readErr: any) {
+          // Permissão negada — tentar readText como fallback
+        }
+      }
+
+      // Fallback: readText
+      if (navigator.clipboard?.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim().length > 0) {
+          onTextReady(text, 'Texto colado');
+          setMode('typing');
+          return;
+        }
+      }
+
+      // Último recurso: focar textarea para colar manualmente
+      textAreaRef.current?.focus();
+      setError('Toque no campo de texto abaixo e segure o dedo para ver a opção "Colar".');
+      setTimeout(() => setError(''), 5000);
+    } catch (err: any) {
+      textAreaRef.current?.focus();
+      setError('Toque no campo abaixo e segure para colar.');
+      setTimeout(() => setError(''), 4000);
+    }
+  };
+
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value;
     onTextReady(text, 'Texto colado/digitado');
@@ -203,7 +263,46 @@ export default function UniversalInputArea({
 
   return (
     <div>
-      {/* Wrapper para drag & drop — sem onPaste para não bloquear iOS */}
+      {/* ===== BOTÃO PRINCIPAL — Importar arquivo (PDF, áudio, texto) ===== */}
+      {/* Este é o fluxo mais confiável no iOS: abre o seletor de arquivos nativo */}
+      <button
+        onClick={() => anyFileInputRef.current?.click()}
+        style={{
+          width: '100%',
+          padding: '16px',
+          background: 'linear-gradient(135deg, #E67E22 0%, #F39C12 100%)',
+          border: 'none',
+          borderRadius: '12px',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '10px',
+          marginBottom: '10px',
+          touchAction: 'manipulation',
+          WebkitTapHighlightColor: 'transparent',
+          boxShadow: '0 3px 10px rgba(230,126,34,0.3)',
+        } as React.CSSProperties}
+      >
+        <FolderOpen size={22} color="white" />
+        <div style={{ textAlign: 'left' }}>
+          <div style={{ fontSize: '15px', fontWeight: '700', color: 'white' }}>
+            📎 Importar PDF, Áudio ou Texto
+          </div>
+          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.85)', marginTop: '1px' }}>
+            Toque para selecionar arquivo do iPhone / iCloud
+          </div>
+        </div>
+      </button>
+
+      {/* Separador */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+        <div style={{ flex: 1, height: '1px', background: '#E8E8E8' }} />
+        <span style={{ fontSize: '11px', color: '#BBB', whiteSpace: 'nowrap' }}>ou cole texto abaixo</span>
+        <div style={{ flex: 1, height: '1px', background: '#E8E8E8' }} />
+      </div>
+
+      {/* Wrapper para drag & drop */}
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -223,23 +322,17 @@ export default function UniversalInputArea({
           </div>
         ) : (
           <>
-            {/*
-              TEXTAREA NATIVO — chave para funcionar no iOS:
-              - Sem onPaste no elemento pai (div wrapper)
-              - onPaste apenas no próprio textarea
-              - onChange captura o texto colado via comportamento nativo
-              - -webkit-user-select: text garante seleção no iOS
-            */}
+            {/* TEXTAREA NATIVO — sem onPaste no pai para não bloquear iOS */}
             <textarea
               ref={textAreaRef}
               value={currentValue}
               onChange={handleTextChange}
               onPaste={handleTextareaPaste}
-              placeholder={"Toque aqui, segure e escolha \"Colar\" ↓\n\nOu arraste um arquivo abaixo..."}
-              rows={5}
+              placeholder={"Toque aqui, segure e escolha \"Colar\" para colar texto\n\nOu use o botão laranja acima para importar PDF/áudio"}
+              rows={4}
               style={{
                 width: '100%',
-                minHeight: '120px',
+                minHeight: '100px',
                 padding: '14px',
                 border: 'none',
                 outline: 'none',
@@ -250,7 +343,6 @@ export default function UniversalInputArea({
                 background: 'transparent',
                 fontFamily: 'system-ui, -apple-system, sans-serif',
                 boxSizing: 'border-box',
-                // iOS específico:
                 WebkitUserSelect: 'text',
                 userSelect: 'text',
                 WebkitAppearance: 'none',
@@ -259,115 +351,48 @@ export default function UniversalInputArea({
               autoCorrect="off"
               autoCapitalize="sentences"
               spellCheck={false}
-              // iOS: garantir que o teclado apareça e o menu de contexto funcione
               inputMode="text"
             />
 
-            {/* Barra de botões de arquivo */}
+            {/* Barra inferior com botão Colar e áudio */}
             <div style={{
               borderTop: '1px dashed #F4A582',
-              padding: '10px 14px',
+              padding: '8px 14px',
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
               flexWrap: 'wrap',
               background: 'rgba(244,165,130,0.05)'
             }}>
-              <span style={{ fontSize: '12px', color: '#AAA' }}>ou selecione:</span>
-
+              {/* Botão Colar — tenta clipboard.read() para arquivos */}
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={handlePasteButton}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '5px',
-                  padding: '6px 12px', background: '#FFF',
-                  border: '1px solid #F4A582', borderRadius: '6px',
-                  cursor: 'pointer', fontSize: '12px', color: '#E67E22', fontWeight: '600',
+                  padding: '7px 14px', background: '#FFF8E1',
+                  border: '1.5px solid #F39C12', borderRadius: '6px',
+                  cursor: 'pointer', fontSize: '13px', color: '#E67E22', fontWeight: '700',
                   touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent'
                 } as React.CSSProperties}
               >
-                <FileText size={13} /> TXT / PDF / SRT
+                <Clipboard size={14} /> Colar
               </button>
 
               <button
                 onClick={() => audioInputRef.current?.click()}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '5px',
-                  padding: '6px 12px', background: '#FFF',
+                  padding: '7px 14px', background: '#FFF',
                   border: '1px solid #9B59B6', borderRadius: '6px',
-                  cursor: 'pointer', fontSize: '12px', color: '#9B59B6', fontWeight: '600',
+                  cursor: 'pointer', fontSize: '13px', color: '#9B59B6', fontWeight: '600',
                   touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent'
                 } as React.CSSProperties}
               >
-                <Mic size={13} /> MP3 / WAV
-              </button>
-
-              <button
-                onClick={() => docxInputRef.current?.click()}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '5px',
-                  padding: '6px 12px', background: '#FFF',
-                  border: '1px solid #5B9BD5', borderRadius: '6px',
-                  cursor: 'pointer', fontSize: '12px', color: '#5B9BD5', fontWeight: '600',
-                  touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent'
-                } as React.CSSProperties}
-              >
-                <Upload size={13} /> DOCX
-              </button>
-
-              {/* Botão Colar via Clipboard API — funciona no iOS 16.4+ e Android */}
-              <button
-                onClick={async () => {
-                  try {
-                    if (!navigator.clipboard?.readText) {
-                      // Fallback: focar o textarea para o usuário colar manualmente
-                      textAreaRef.current?.focus();
-                      setError('Toque no campo de texto acima e segure para colar.');
-                      setTimeout(() => setError(''), 4000);
-                      return;
-                    }
-                    const text = await navigator.clipboard.readText();
-                    if (text && text.trim().length > 0) {
-                      onTextReady(text, 'Texto colado');
-                      setMode('typing');
-                    } else {
-                      setError('Área de transferência vazia ou sem texto.');
-                      setTimeout(() => setError(''), 3000);
-                    }
-                  } catch (err: any) {
-                    // Permissão negada ou API indisponível — focar textarea
-                    textAreaRef.current?.focus();
-                    setError('Toque no campo acima e segure o dedo para colar.');
-                    setTimeout(() => setError(''), 4000);
-                  }
-                }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '5px',
-                  padding: '6px 12px', background: '#FFF8E1',
-                  border: '1px solid #F39C12', borderRadius: '6px',
-                  cursor: 'pointer', fontSize: '12px', color: '#E67E22', fontWeight: '700',
-                  touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent'
-                } as React.CSSProperties}
-              >
-                <Clipboard size={13} /> Colar
+                <Mic size={14} /> Áudio
               </button>
             </div>
           </>
         )}
-      </div>
-
-      {/* Dica visual iOS */}
-      <div style={{
-        marginTop: '8px', padding: '10px 12px',
-        background: '#EBF5FB', borderRadius: '8px',
-        display: 'flex', alignItems: 'flex-start', gap: '8px'
-      }}>
-        <Clipboard size={14} color="#2980B9" style={{ flexShrink: 0, marginTop: '2px' }} />
-        <div style={{ fontSize: '12px', color: '#2980B9', lineHeight: '1.7' }}>
-          <strong>Como importar no celular:</strong><br />
-          • <strong>PDF / Áudio:</strong> No app de origem, toque em <strong>Compartilhar ↗</strong> e escolha <strong>"Rounder"</strong><br />
-          • <strong>Texto copiado:</strong> Toque no campo acima, segure e escolha <strong>"Colar"</strong><br />
-          • <strong>Arquivo salvo:</strong> Use o botão <strong>TXT / PDF / SRT</strong> acima
-        </div>
       </div>
 
       {/* Erro */}
@@ -382,16 +407,22 @@ export default function UniversalInputArea({
         </div>
       )}
 
-      {/* Inputs de arquivo ocultos separados por tipo */}
-      <input ref={fileInputRef} type="file"
-        accept=".txt,.pdf,.srt,.vtt,.md,.csv,.rtf"
-        style={{ display: 'none' }} onChange={handleFileChange} />
-      <input ref={audioInputRef} type="file"
+      {/* Inputs de arquivo ocultos */}
+      {/* Input universal — aceita PDF, áudio e texto */}
+      <input
+        ref={anyFileInputRef}
+        type="file"
+        accept=".txt,.pdf,.srt,.vtt,.md,.csv,.rtf,.docx,.doc,.mp3,.wav,.webm,.m4a,.ogg,.aac"
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
+      <input
+        ref={audioInputRef}
+        type="file"
         accept=".mp3,.wav,.webm,.m4a,.ogg,.aac"
-        style={{ display: 'none' }} onChange={handleFileChange} />
-      <input ref={docxInputRef} type="file"
-        accept=".docx,.doc"
-        style={{ display: 'none' }} onChange={handleFileChange} />
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
     </div>
   );
 }
