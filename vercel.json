@@ -7,13 +7,7 @@
   "framework": null,
   "functions": {
     "api/index.ts": {
-      "includeFiles": [
-        "server/schema.sql",
-        "node_modules/pdf-parse/dist/pdf-parse/**",
-        "node_modules/pdf-parse/dist/worker/**",
-        "node_modules/pdfjs-dist/**",
-        "node_modules/@thednp/dommatrix/**"
-      ]
+      "includeFiles": "{server/schema.sql,node_modules/pdf-parse/dist/pdf-parse/**,node_modules/pdf-parse/dist/worker/**,node_modules/pdfjs-dist/**,node_modules/@thednp/dommatrix/**}"
     }
   },
   "rewrites": [
