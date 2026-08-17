@@ -78,11 +78,11 @@ As credenciais de teste e segredos ficam fora deste arquivo e não devem ser inc
 |---|---|---|
 | Sessão e login | Refresh token em cookie `HttpOnly`, sessão rotativa/revogável, limite de tentativas, encerramento global, expiração curta de access token e redefinição de senha invalidando sessões. | Login, refresh, logout, alteração de senha e recuperação por e-mail em produção. |
 | Segredos de IA | Chaves passam a ser cifradas no servidor e nunca são devolvidas ao navegador; geração, validação e transcrição usam proxy autenticado. | Cadastro de chaves, geração real e métricas por provedor. |
-| PDF e PWA | Extração de PDF adaptada à API atual do `pdf-parse`; registro do service worker inserido na árvore ativa. | Importação real de PDF e Share Target em PWA instalado no iOS. |
+| PDF e PWA | Extração de PDF usa importação tardia do `pdf-parse` e polyfill `DOMMatrix` compatível com Node/serverless; registro do service worker inserido na árvore ativa. O teste isolado sem `DOMMatrix` nativo extraiu 17.606 caracteres em 14 páginas do PDF de referência. | Publicar e repetir a importação real de PDF na produção; Share Target ainda requer teste em PWA instalado no iOS. |
 | Regras e SISOP | Contrato de regras corrigido na tela principal; SISOP restrito por papel no backend e ocultado para usuários não autorizados; data de checagem é renovada mesmo sem release externa. | Contas com papéis distintos e checagem SISOP em produção. |
 | Privacidade e conta | Termos, Política de Privacidade e aviso clínico públicos; aceite versionado; painel com sessões, logout global, exportação e exclusão confirmada; cadastro requer aceite informado. | Persistência de aceite, exportação e exclusão em conta de teste descartável. |
 | Navegação | Rotas antigas, desconectadas e com dependência de Supabase foram removidas da release ativa; a experiência publicada concentra-se no fluxo principal protegido. | Navegação completa no browser após deploy. |
-| Runtime Vercel | O primeiro deploy auditado respondeu `FUNCTION_INVOCATION_FAILED` no login: a importação estática de `pdf-parse` impedia a inicialização da função. A dependência foi deslocada para importação tardia, apenas na rota de PDF. | Deploy corretivo e login/PDF em produção. |
+| Runtime Vercel | O primeiro deploy auditado respondeu `FUNCTION_INVOCATION_FAILED` no login: a importação estática de `pdf-parse` impedia a inicialização da função. A dependência foi deslocada para importação tardia; o erro seguinte de `DOMMatrix` ausente foi coberto com polyfill puro JavaScript. | Deploy corretivo e login/PDF em produção. |
 
 ## Próxima atualização
 

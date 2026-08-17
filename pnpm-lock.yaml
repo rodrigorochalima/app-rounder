@@ -106,6 +106,9 @@ importers:
       '@tanstack/react-query':
         specifier: ^4.41.0
         version: 4.41.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@thednp/dommatrix':
+        specifier: ^3.1.1
+        version: 3.1.1
       '@types/multer':
         specifier: ^2.1.0
         version: 2.1.0
@@ -1789,6 +1792,9 @@ packages:
         optional: true
       react-native:
         optional: true
+
+  '@thednp/dommatrix@3.1.1':
+    resolution: {integrity: sha512-LQw9A56KeDYN9aPFGjad2xTpGNnsIsvq98k1l28HNsvi+SuRFY6M5ET3f0SFrtssOKOcvgqmObztR0/dc6kSZQ==}
 
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
@@ -6003,6 +6009,8 @@ snapshots:
       use-sync-external-store: 1.6.0(react@18.3.1)
     optionalDependencies:
       react-dom: 18.3.1(react@18.3.1)
+
+  '@thednp/dommatrix@3.1.1': {}
 
   '@types/babel__core@7.20.5':
     dependencies:

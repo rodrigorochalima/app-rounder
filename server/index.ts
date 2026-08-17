@@ -14,6 +14,13 @@ import { pool, query } from './db.js';
 import { Resend } from 'resend';
 import multer from 'multer';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import DOMMatrixPolyfill from '@thednp/dommatrix';
+
+// O runtime serverless não expõe DOMMatrix, exigido internamente pelo pdf.js.
+// O polyfill é instalado antes da importação tardia do pdf-parse.
+if (typeof (globalThis as any).DOMMatrix === 'undefined') {
+  (globalThis as any).DOMMatrix = DOMMatrixPolyfill;
+}
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
