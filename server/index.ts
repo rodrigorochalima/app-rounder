@@ -14,13 +14,6 @@ import { pool, query } from './db.js';
 import { Resend } from 'resend';
 import multer from 'multer';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
-import DOMMatrixPolyfill from '@thednp/dommatrix';
-
-// O runtime serverless não expõe DOMMatrix, exigido internamente pelo pdf.js.
-// O polyfill é instalado antes da importação tardia do pdf-parse.
-if (typeof (globalThis as any).DOMMatrix === 'undefined') {
-  (globalThis as any).DOMMatrix = DOMMatrixPolyfill;
-}
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -1002,23 +995,18 @@ app.post('/api/extract-text', authenticateToken, upload.single('file'), async (r
     const { originalname, buffer, mimetype } = req.file;
     const ext = originalname.split('.').pop()?.toLowerCase() || '';
 
-    // PDF: usa a API v2 do pdf-parse, compatível com runtime Node/serverless.
+    // PDF: o módulo clássico usa PDF.js para Node e não exige APIs gráficas do browser.
     if (ext === 'pdf' || mimetype === 'application/pdf') {
-      let parser: { getText: () => Promise<{ text?: string; total?: number }>; destroy: () => Promise<void> } | null = null;
       try {
-        // Importação tardia: algumas versões do pdf-parse inicializam APIs gráficas
-        // ausentes no runtime serverless se forem carregadas durante o boot da função.
-        const { PDFParse } = await import('pdf-parse');
-        parser = new PDFParse({ data: buffer });
-        const data = await parser.getText();
-        const text = data.text?.trim() || '';
+        const module = await import('pdf-parse');
+        const pdfParse = (module as any).default || module;
+        const data = await pdfParse(buffer);
+        const text = String(data.text || '').trim();
         if (!text) return res.status(422).json({ error: 'Não foi possível localizar texto neste PDF. Se ele for uma imagem digitalizada, envie uma transcrição ou use um PDF com texto selecionável.' });
-        return res.json({ text, pages: data.total, source: originalname });
+        return res.json({ text, pages: Number(data.numpages || 0), source: originalname });
       } catch (pdfErr: any) {
         console.error('Falha na extração de PDF:', pdfErr?.message);
         return res.status(422).json({ error: 'Não foi possível processar este PDF. Verifique se o arquivo não está protegido por senha ou corrompido.' });
-      } finally {
-        await parser?.destroy().catch(() => undefined);
       }
     }
 
