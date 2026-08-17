@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { Eye, EyeOff, Mail, Lock, User, Phone, FileText } from 'lucide-react';
 import { login, signup, requestPasswordReset } from '@/services/auth/auth.service';
+import { legalAPI } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
 
@@ -18,6 +19,7 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [resetEmailSent, setResetEmailSent] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   // Campos do formulário
   const [email, setEmail] = useState('');
@@ -40,6 +42,7 @@ export default function AuthPage() {
         // Usar window.location para garantir navegação e re-hidratação do AuthContext
         window.location.href = '/';
       } else if (mode === 'signup') {
+        if (!acceptedTerms) throw new Error('Leia e aceite os Termos de Uso e a Política de Privacidade para criar sua conta.');
         const session = await signup({
           email,
           password,
@@ -50,6 +53,11 @@ export default function AuthPage() {
           crmState
         });
         setSession(session);
+        await Promise.all([
+          legalAPI.accept('terms'),
+          legalAPI.accept('privacy'),
+          legalAPI.accept('clinical_ai_notice'),
+        ]);
         window.location.href = '/';
       } else if (mode === 'reset') {
         await requestPasswordReset({ email });
@@ -242,7 +250,7 @@ export default function AuthPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  minLength={6}
+                  minLength={10}
                   className="w-full pl-11 pr-12 py-3 border-2 border-gray-200 rounded-2xl focus:ring-2 focus:ring-[#5B9BD5] focus:border-transparent transition-all"
                   placeholder="••••••••"
                 />
@@ -281,16 +289,12 @@ export default function AuthPage() {
 
             {/* Termos (apenas cadastro) */}
             {mode === 'signup' && (
-              <div className="text-xs text-gray-600 bg-[#A8D8EA]/20 p-4 rounded-2xl border border-[#A8D8EA]">
-                Ao criar uma conta, você concorda com nossos{' '}
-                <button type="button" className="text-[#5B9BD5] hover:underline font-semibold">
-                  Termos de Uso
-                </button>{' '}
-                e{' '}
-                <button type="button" className="text-[#5B9BD5] hover:underline font-semibold">
-                  Política de Privacidade
-                </button>
-              </div>
+              <label className="flex items-start gap-3 text-xs text-gray-600 bg-[#A8D8EA]/20 p-4 rounded-2xl border border-[#A8D8EA] cursor-pointer">
+                <input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} className="mt-0.5" />
+                <span>
+                  Li e aceito os <a href="/legal/terms" target="_blank" rel="noreferrer" className="text-[#377cb3] hover:underline font-semibold">Termos de Uso</a>, a <a href="/legal/privacy" target="_blank" rel="noreferrer" className="text-[#377cb3] hover:underline font-semibold">Política de Privacidade</a> e o <a href="/legal/clinical-ai" target="_blank" rel="noreferrer" className="text-[#377cb3] hover:underline font-semibold">Aviso de Segurança Clínica e IA</a>.
+                </span>
+              </label>
             )}
 
             {/* Botão de submit */}
@@ -341,6 +345,9 @@ export default function AuthPage() {
           </p>
           <p className="text-xs opacity-75">
             App Rounder • Gerador Inteligente de Rounds Médicos
+          </p>
+          <p className="text-xs mt-2 opacity-90">
+            <a href="/legal/terms" className="underline">Termos</a> · <a href="/legal/privacy" className="underline">Privacidade</a>
           </p>
         </div>
       </div>

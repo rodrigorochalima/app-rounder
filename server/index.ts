@@ -7,12 +7,14 @@ import express from 'express';
 import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool, query } from './db.js';
 import { Resend } from 'resend';
 import multer from 'multer';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { PDFParse } from 'pdf-parse';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -22,9 +24,96 @@ const APP_URL = process.env.APP_URL || 'https://app-rounder.vercel.app';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const JWT_SECRET = process.env.JWT_SECRET || 'app-rounder-secret-2025-change-in-production';
-const JWT_EXPIRES_IN = '7d';
+const configuredJwtSecret = process.env.JWT_SECRET;
+if (process.env.NODE_ENV === 'production' && !configuredJwtSecret) {
+  throw new Error('JWT_SECRET é obrigatório em produção.');
+}
+const JWT_SECRET = configuredJwtSecret || 'app-rounder-development-secret-only';
+const JWT_EXPIRES_IN = '15m';
 const REFRESH_TOKEN_EXPIRES_DAYS = 30;
+const AUTH_COOKIE_NAME = 'rounder_rt';
+const API_KEY_ENCRYPTION_SECRET = process.env.API_KEY_ENCRYPTION_SECRET || JWT_SECRET;
+const ALLOWED_ORIGINS = new Set([APP_URL, 'https://app-rounder.vercel.app', 'http://localhost:5173']);
+
+type RateLimitOptions = { windowMs: number; max: number; keyPrefix: string };
+type RateLimitBucket = { count: number; resetAt: number };
+const rateLimitBuckets = new Map<string, RateLimitBucket>();
+
+function getClientIp(req: any): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  return (Array.isArray(forwarded) ? forwarded[0] : forwarded || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+}
+
+function createRateLimiter(options: RateLimitOptions) {
+  return (req: any, res: any, next: any) => {
+    const now = Date.now();
+    const key = `${options.keyPrefix}:${getClientIp(req)}:${String(req.body?.email || '').toLowerCase()}`;
+    const bucket = rateLimitBuckets.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      rateLimitBuckets.set(key, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+    bucket.count += 1;
+    if (bucket.count > options.max) {
+      res.setHeader('Retry-After', Math.ceil((bucket.resetAt - now) / 1000));
+      return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.' });
+    }
+    return next();
+  };
+}
+
+const loginRateLimit = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8, keyPrefix: 'login' });
+const resetRateLimit = createRateLimiter({ windowMs: 60 * 60 * 1000, max: 4, keyPrefix: 'password-reset' });
+
+function hashOpaqueToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function parseCookies(req: any): Record<string, string> {
+  const cookie = req.headers.cookie || '';
+  return cookie.split(';').reduce((cookies: Record<string, string>, item: string) => {
+    const index = item.indexOf('=');
+    if (index > 0) cookies[item.slice(0, index).trim()] = decodeURIComponent(item.slice(index + 1).trim());
+    return cookies;
+  }, {});
+}
+
+function setRefreshCookie(res: any, token: string, remember: boolean) {
+  const attributes = [`${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}`, 'HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/api/auth'];
+  if (remember) attributes.push(`Max-Age=${REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60}`);
+  res.setHeader('Set-Cookie', attributes.join('; '));
+}
+
+function clearRefreshCookie(res: any) {
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE_NAME}=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0`);
+}
+
+function getAccessToken(user: any): string {
+  return jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+}
+
+function encryptApiSecret(secret: string): { encrypted: string; iv: string } {
+  const key = createHash('sha256').update(API_KEY_ENCRYPTION_SECRET).digest();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+  return { encrypted: encrypted.toString('base64'), iv: `${iv.toString('base64')}.${cipher.getAuthTag().toString('base64')}` };
+}
+
+function decryptApiSecret(encrypted: string, encryptionIv: string): string {
+  // Compatibilidade temporária com a codificação Base64 legada. A chave será recifrada ao ser cadastrada novamente.
+  if (!encryptionIv?.includes('.')) return Buffer.from(encrypted, 'base64').toString('utf8');
+  const [ivBase64, tagBase64] = encryptionIv.split('.');
+  const key = createHash('sha256').update(API_KEY_ENCRYPTION_SECRET).digest();
+  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivBase64, 'base64'));
+  decipher.setAuthTag(Buffer.from(tagBase64, 'base64'));
+  return Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64')), decipher.final()]).toString('utf8');
+}
+
+function mapApiKeyMetadata(row: any) {
+  const { encrypted_key, encryption_iv, ...metadata } = row;
+  return metadata;
+}
 
 const DEFAULT_RULES = [
   'Identificar o paciente pelo nome completo e leito',
@@ -50,13 +139,19 @@ let dbInitialized = false;
 async function initDatabase() {
   if (dbInitialized) return;
   try {
-    const schemaPath = path.resolve(__dirname, 'schema.sql');
+    const schemaCandidates = [
+      path.resolve(__dirname, 'schema.sql'),
+      path.resolve(process.cwd(), 'server/schema.sql'),
+    ];
+    const schemaPath = schemaCandidates.find(existsSync);
+    if (!schemaPath) throw new Error('Arquivo de migração schema.sql não encontrado no runtime.');
     const schema = readFileSync(schemaPath, 'utf-8');
     await pool.query(schema);
     dbInitialized = true;
     console.log('✅ Schema do banco de dados inicializado');
   } catch (error: any) {
     console.error('❌ Erro ao inicializar schema:', error.message);
+    throw error;
   }
 }
 
@@ -75,17 +170,43 @@ function authenticateToken(req: any, res: any, next: any) {
 }
 
 function generateRefreshToken(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let token = '';
-  for (let i = 0; i < 64; i++) token += chars.charAt(Math.floor(Math.random() * chars.length));
-  return token;
+  return randomBytes(48).toString('base64url');
 }
 
 function generateResetToken(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let token = '';
-  for (let i = 0; i < 96; i++) token += chars.charAt(Math.floor(Math.random() * chars.length));
-  return token;
+  return randomBytes(48).toString('base64url');
+}
+
+async function createRefreshSession(userId: string, req: any): Promise<string> {
+  const refreshToken = generateRefreshToken();
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
+  const userAgent = String(req.headers['user-agent'] || '').slice(0, 500);
+  const ipHash = hashOpaqueToken(getClientIp(req));
+  await query(
+    `INSERT INTO refresh_tokens (user_id, token, token_hash, session_id, expires_at, user_agent, ip_hash, last_used_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+    [userId, randomUUID(), hashOpaqueToken(refreshToken), randomUUID(), expiresAt.toISOString(), userAgent, ipHash]
+  );
+  return refreshToken;
+}
+
+async function revokeRefreshSession(refreshToken: string | undefined) {
+  if (!refreshToken) return;
+  await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL', [hashOpaqueToken(refreshToken)]);
+}
+
+function requireRole(...allowedRoles: string[]) {
+  return async (req: any, res: any, next: any) => {
+    try {
+      const profile = await query('SELECT role FROM user_profiles WHERE user_id = $1', [req.userId]);
+      const role = profile.rows[0]?.role || 'rotineiro';
+      if (!allowedRoles.includes(role)) return res.status(403).json({ error: 'Acesso restrito ao perfil autorizado.' });
+      req.userRole = role;
+      return next();
+    } catch {
+      return res.status(500).json({ error: 'Não foi possível validar a autorização.' });
+    }
+  };
 }
 
 function mapProfile(user: any, profile: any) {
@@ -112,30 +233,46 @@ function mapProfile(user: any, profile: any) {
 
 // Criar o app Express
 const app = express();
-
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.disable('x-powered-by');
 
 app.use((req: any, res: any, next: any) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary', 'Origin');
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  res.header('X-Content-Type-Options', 'nosniff');
+  res.header('X-Frame-Options', 'DENY');
+  res.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.header('Permissions-Policy', 'camera=(), geolocation=(self), microphone=(self), payment=()');
+  res.header('Content-Security-Policy', "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self' https://api.cerebras.ai https://api.groq.com https://generativelanguage.googleapis.com https://api.openai.com https://api.deepseek.com https://dashscope.aliyuncs.com");
+  if (req.method === 'OPTIONS') return origin && !ALLOWED_ORIGINS.has(origin) ? res.sendStatus(403) : res.sendStatus(204);
   next();
 });
 
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+
 // Inicializar banco antes de cada request em serverless
-app.use(async (_req: any, _res: any, next: any) => {
-  await initDatabase();
-  next();
+app.use(async (_req: any, res: any, next: any) => {
+  try {
+    await initDatabase();
+    next();
+  } catch {
+    res.status(503).json({ error: 'Serviço temporariamente indisponível durante a inicialização segura.' });
+  }
 });
 
 // ---- AUTH ----
 
-app.post('/api/auth/signup', async (req: any, res: any) => {
+app.post('/api/auth/signup', loginRateLimit, async (req: any, res: any) => {
   try {
-    const { email, password, fullName } = req.body;
+    const { email, password, fullName, rememberMe = true } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email e senha são obrigatórios' });
+    if (String(password).length < 10) return res.status(400).json({ error: 'Use uma senha com pelo menos 10 caracteres.' });
     const existing = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
     if (existing.rows.length > 0) return res.status(409).json({ error: 'Este email já está cadastrado' });
     const passwordHash = await bcrypt.hash(password, 12);
@@ -148,33 +285,29 @@ app.post('/api/auth/signup', async (req: any, res: any) => {
     for (let i = 0; i < DEFAULT_RULES.length; i++) {
       await query('INSERT INTO round_rules (user_id, rule_text, is_active, order_index) VALUES ($1, $2, $3, $4)', [user.id, DEFAULT_RULES[i], true, i + 1]);
     }
-    const accessToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    const refreshToken = generateRefreshToken();
-    const refreshExpires = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
-    await query('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)', [user.id, refreshToken, refreshExpires.toISOString()]);
+    const refreshToken = await createRefreshSession(user.id, req);
+    setRefreshCookie(res, refreshToken, rememberMe !== false);
     const profileResult = await query('SELECT * FROM user_profiles WHERE user_id = $1', [user.id]);
-    return res.status(201).json({ user: mapProfile(user, profileResult.rows[0]), accessToken, refreshToken, expiresAt: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 });
+    return res.status(201).json({ user: mapProfile(user, profileResult.rows[0]), accessToken: getAccessToken(user), expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 });
   } catch (error: any) {
     console.error('Erro signup:', error.message);
     return res.status(500).json({ error: 'Erro interno ao criar conta' });
   }
 });
 
-app.post('/api/auth/login', async (req: any, res: any) => {
+app.post('/api/auth/login', loginRateLimit, async (req: any, res: any) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, rememberMe = true } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email e senha são obrigatórios' });
     const userResult = await query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
     if (userResult.rows.length === 0) return res.status(401).json({ error: 'Email ou senha incorretos' });
     const user = userResult.rows[0];
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) return res.status(401).json({ error: 'Email ou senha incorretos' });
-    const accessToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    const refreshToken = generateRefreshToken();
-    const refreshExpires = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
-    await query('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)', [user.id, refreshToken, refreshExpires.toISOString()]);
+    const refreshToken = await createRefreshSession(user.id, req);
+    setRefreshCookie(res, refreshToken, rememberMe !== false);
     const profileResult = await query('SELECT * FROM user_profiles WHERE user_id = $1', [user.id]);
-    return res.json({ user: mapProfile(user, profileResult.rows[0]), accessToken, refreshToken, expiresAt: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 });
+    return res.json({ user: mapProfile(user, profileResult.rows[0]), accessToken: getAccessToken(user), expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 });
   } catch (error: any) {
     console.error('Erro login:', error.message);
     return res.status(500).json({ error: 'Erro interno ao fazer login' });
@@ -183,26 +316,60 @@ app.post('/api/auth/login', async (req: any, res: any) => {
 
 app.post('/api/auth/refresh', async (req: any, res: any) => {
   try {
-    const { refreshToken } = req.body;
-    if (!refreshToken) return res.status(400).json({ error: 'Refresh token necessário' });
-    const tokenResult = await query('SELECT * FROM refresh_tokens WHERE token = $1 AND expires_at > NOW()', [refreshToken]);
-    if (tokenResult.rows.length === 0) return res.status(403).json({ error: 'Refresh token inválido ou expirado' });
-    const userResult = await query('SELECT * FROM users WHERE id = $1', [tokenResult.rows[0].user_id]);
-    const user = userResult.rows[0];
-    const newAccessToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    return res.json({ accessToken: newAccessToken, expiresAt: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 });
+    const refreshToken = parseCookies(req)[AUTH_COOKIE_NAME] || req.body?.refreshToken;
+    if (!refreshToken) return res.status(403).json({ error: 'Sessão expirada. Entre novamente.' });
+    const tokenHash = hashOpaqueToken(refreshToken);
+    const tokenResult = await query(
+      `SELECT * FROM refresh_tokens
+       WHERE ((token_hash = $1) OR (token = $2 AND token_hash IS NULL))
+         AND revoked_at IS NULL AND expires_at > NOW()`,
+      [tokenHash, refreshToken]
+    );
+    if (tokenResult.rows.length === 0) return res.status(403).json({ error: 'Sessão expirada. Entre novamente.' });
+    const session = tokenResult.rows[0];
+    const userResult = await query('SELECT * FROM users WHERE id = $1', [session.user_id]);
+    if (userResult.rows.length === 0) return res.status(403).json({ error: 'Sessão inválida.' });
+    await query('UPDATE refresh_tokens SET revoked_at = NOW(), last_used_at = NOW() WHERE id = $1', [session.id]);
+    const nextRefreshToken = await createRefreshSession(session.user_id, req);
+    setRefreshCookie(res, nextRefreshToken, true);
+    return res.json({ accessToken: getAccessToken(userResult.rows[0]), expiresAt: Math.floor(Date.now() / 1000) + 15 * 60 });
   } catch (error: any) {
-    return res.status(500).json({ error: 'Erro ao renovar token' });
+    return res.status(500).json({ error: 'Erro ao renovar sessão' });
   }
 });
 
 app.post('/api/auth/logout', authenticateToken, async (req: any, res: any) => {
   try {
-    const { refreshToken } = req.body;
-    if (refreshToken) await query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
+    const refreshToken = parseCookies(req)[AUTH_COOKIE_NAME] || req.body?.refreshToken;
+    await revokeRefreshSession(refreshToken);
+    clearRefreshCookie(res);
     return res.json({ message: 'Logout realizado com sucesso' });
   } catch {
     return res.status(500).json({ error: 'Erro ao fazer logout' });
+  }
+});
+
+app.post('/api/auth/logout-all', authenticateToken, async (req: any, res: any) => {
+  try {
+    await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [req.userId]);
+    clearRefreshCookie(res);
+    return res.json({ message: 'Sessões encerradas com sucesso' });
+  } catch {
+    return res.status(500).json({ error: 'Erro ao encerrar sessões' });
+  }
+});
+
+app.get('/api/auth/sessions', authenticateToken, async (req: any, res: any) => {
+  try {
+    const sessions = await query(
+      `SELECT id, session_id, user_agent, created_at, last_used_at, expires_at
+       FROM refresh_tokens WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+       ORDER BY last_used_at DESC NULLS LAST, created_at DESC`,
+      [req.userId]
+    );
+    return res.json({ data: sessions.rows });
+  } catch {
+    return res.status(500).json({ error: 'Erro ao listar sessões' });
   }
 });
 
@@ -218,7 +385,7 @@ app.get('/api/auth/me', authenticateToken, async (req: any, res: any) => {
 });
 
 // Solicitar reset de senha — envia e-mail real via Resend
-app.post('/api/auth/reset-password', async (req: any, res: any) => {
+app.post('/api/auth/reset-password', resetRateLimit, async (req: any, res: any) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email é obrigatório' });
@@ -282,7 +449,7 @@ app.post('/api/auth/reset-password/confirm', async (req: any, res: any) => {
   try {
     const { token, newPassword } = req.body;
     if (!token || !newPassword) return res.status(400).json({ error: 'Token e nova senha são obrigatórios' });
-    if (newPassword.length < 6) return res.status(400).json({ error: 'A senha deve ter pelo menos 6 caracteres' });
+    if (newPassword.length < 10) return res.status(400).json({ error: 'A senha deve ter pelo menos 10 caracteres' });
 
     // Buscar token válido
     const tokenResult = await query(
@@ -302,8 +469,8 @@ app.post('/api/auth/reset-password/confirm', async (req: any, res: any) => {
     // Marcar token como usado
     await query('UPDATE password_reset_tokens SET used = true WHERE id = $1', [resetRecord.id]);
 
-    // Invalidar todos os refresh tokens do usuário (segurança)
-    await query('DELETE FROM refresh_tokens WHERE user_id = $1', [resetRecord.user_id]);
+    // Invalidar todas as sessões ativas após redefinição de senha.
+    await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [resetRecord.user_id]);
 
     return res.json({ message: 'Senha redefinida com sucesso! Você já pode fazer login.' });
   } catch (error: any) {
@@ -319,9 +486,12 @@ app.put('/api/auth/update-password', authenticateToken, async (req: any, res: an
     const user = userResult.rows[0];
     const valid = await bcrypt.compare(currentPassword, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Senha atual incorreta' });
+    if (!newPassword || newPassword.length < 10) return res.status(400).json({ error: 'A nova senha deve ter pelo menos 10 caracteres' });
     const newHash = await bcrypt.hash(newPassword, 12);
     await query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, req.userId]);
-    return res.json({ message: 'Senha atualizada com sucesso' });
+    await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [req.userId]);
+    clearRefreshCookie(res);
+    return res.json({ message: 'Senha atualizada. Faça login novamente em todos os dispositivos.' });
   } catch {
     return res.status(500).json({ error: 'Erro ao atualizar senha' });
   }
@@ -354,11 +524,112 @@ app.put('/api/profile', authenticateToken, async (req: any, res: any) => {
   }
 });
 
+// ---- DIREITOS DE PRIVACIDADE E GESTÃO DE CONTA ----
+const LEGAL_DOCUMENT_VERSIONS = {
+  terms: '2026-08-17',
+  privacy: '2026-08-17',
+  clinical_ai_notice: '2026-08-17',
+} as const;
+
+app.post('/api/legal/acceptance', authenticateToken, async (req: any, res: any) => {
+  try {
+    const type = String(req.body?.document_type || '');
+    if (!(type in LEGAL_DOCUMENT_VERSIONS)) return res.status(400).json({ error: 'Documento legal inválido.' });
+    const version = LEGAL_DOCUMENT_VERSIONS[type as keyof typeof LEGAL_DOCUMENT_VERSIONS];
+    await query(
+      `INSERT INTO legal_acceptances (user_id, document_type, document_version, ip_hash, user_agent)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.userId, type, version, hashOpaqueToken(getClientIp(req)), String(req.headers['user-agent'] || '').slice(0, 500)]
+    );
+    return res.status(201).json({ document_type: type, document_version: version, accepted_at: new Date().toISOString() });
+  } catch {
+    return res.status(500).json({ error: 'Não foi possível registrar o aceite legal.' });
+  }
+});
+
+app.get('/api/legal/acceptances', authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await query(
+      `SELECT document_type, document_version, accepted_at FROM legal_acceptances
+       WHERE user_id = $1 ORDER BY accepted_at DESC`,
+      [req.userId]
+    );
+    return res.json({ data: result.rows, versions: LEGAL_DOCUMENT_VERSIONS });
+  } catch {
+    return res.status(500).json({ error: 'Não foi possível consultar os aceites legais.' });
+  }
+});
+
+app.get('/api/account/export', authenticateToken, async (req: any, res: any) => {
+  try {
+    const [account, profile, rules, rounds, institutions, doctor, patients, pendingItems, rag, apiKeys, acceptances] = await Promise.all([
+      query('SELECT email, email_verified, created_at, updated_at FROM users WHERE id = $1', [req.userId]),
+      query('SELECT full_name, phone, specialty, crm, crm_state, hospital_name, hospital_phone, position, personal_phone, created_at, updated_at FROM user_profiles WHERE user_id = $1', [req.userId]),
+      query('SELECT rule_text, is_active, order_index, created_at, updated_at FROM round_rules WHERE user_id = $1 ORDER BY order_index', [req.userId]),
+      query('SELECT round_date, round_name, transcription_text, generated_document, raw_input_text, llm_provider, tokens_used, created_at FROM round_history WHERE user_id = $1 ORDER BY created_at DESC', [req.userId]),
+      query('SELECT name, short_name, address, city, state, phone, email, cnpj, cnes, gps_lat, gps_lng, maps_url, total_beds, icu_type, is_default, created_at, updated_at FROM institutions WHERE user_id = $1', [req.userId]),
+      query('SELECT full_name, crm, crm_state, specialty, rqe, phone, email, show_crm, show_specialty, show_phone, show_email, show_qrcode, qrcode_url, footer_text, created_at, updated_at FROM doctor_profiles WHERE user_id = $1', [req.userId]),
+      query('SELECT * FROM clinical_patients WHERE user_id = $1 ORDER BY bed_number', [req.userId]),
+      query('SELECT * FROM clinical_pending_items WHERE user_id = $1 ORDER BY created_at DESC', [req.userId]),
+      query('SELECT source_type, source_date, bed_number, patient_name, chunk_text, chunk_index, metadata, created_at, expires_at FROM rag_embeddings WHERE user_id = $1 ORDER BY source_date DESC, chunk_index', [req.userId]),
+      query('SELECT id, provider, name, is_active, is_default, monthly_limit, current_month_usage, created_at, updated_at FROM user_api_keys WHERE user_id = $1', [req.userId]),
+      query('SELECT document_type, document_version, accepted_at FROM legal_acceptances WHERE user_id = $1 ORDER BY accepted_at DESC', [req.userId]),
+    ]);
+    return res.json({
+      exported_at: new Date().toISOString(),
+      format_version: '1.0',
+      account: account.rows[0] || null,
+      profile: profile.rows[0] || null,
+      rules: rules.rows,
+      rounds: rounds.rows,
+      institutions: institutions.rows,
+      doctor_profile: doctor.rows[0] || null,
+      clinical_patients: patients.rows,
+      clinical_pending_items: pendingItems.rows,
+      rag_chunks: rag.rows,
+      api_key_metadata: apiKeys.rows,
+      legal_acceptances: acceptances.rows,
+    });
+  } catch (error: any) {
+    console.error('Falha na exportação de dados:', error?.message);
+    return res.status(500).json({ error: 'Não foi possível preparar sua exportação de dados.' });
+  }
+});
+
+app.delete('/api/account', authenticateToken, async (req: any, res: any) => {
+  const client = await pool.connect();
+  try {
+    const { currentPassword, confirmation } = req.body || {};
+    if (confirmation !== 'EXCLUIR MINHA CONTA') return res.status(400).json({ error: 'Digite EXCLUIR MINHA CONTA para confirmar.' });
+    const userResult = await client.query('SELECT password_hash FROM users WHERE id = $1 FOR UPDATE', [req.userId]);
+    if (userResult.rows.length === 0) return res.status(404).json({ error: 'Conta não encontrada.' });
+    const passwordOk = await bcrypt.compare(String(currentPassword || ''), userResult.rows[0].password_hash);
+    if (!passwordOk) return res.status(401).json({ error: 'Senha atual incorreta.' });
+    await client.query('BEGIN');
+    await client.query('INSERT INTO account_deletion_requests (user_id, confirmation_method) VALUES ($1, $2)', [req.userId, 'password']);
+    await client.query('DELETE FROM users WHERE id = $1', [req.userId]);
+    await client.query('COMMIT');
+    clearRefreshCookie(res);
+    return res.json({ message: 'Sua conta e os dados associados foram excluídos.' });
+  } catch (error: any) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.error('Falha na exclusão de conta:', error?.message);
+    return res.status(500).json({ error: 'Não foi possível concluir a exclusão da conta. Tente novamente ou entre em contato pelo suporte.' });
+  } finally {
+    client.release();
+  }
+});
+
 // ---- API KEYS ----
 
 app.get('/api/api-keys', authenticateToken, async (req: any, res: any) => {
   try {
-    const result = await query('SELECT * FROM user_api_keys WHERE user_id = $1 ORDER BY created_at DESC', [req.userId]);
+    const result = await query(
+      `SELECT id, user_id, provider, name, is_active, is_default, monthly_limit, current_month_usage,
+              cost_per_million_tokens, last_used_at, notes, created_at, updated_at
+       FROM user_api_keys WHERE user_id = $1 ORDER BY created_at DESC`,
+      [req.userId]
+    );
     return res.json({ data: result.rows });
   } catch {
     return res.status(500).json({ error: 'Erro ao buscar API keys' });
@@ -367,15 +638,19 @@ app.get('/api/api-keys', authenticateToken, async (req: any, res: any) => {
 
 app.post('/api/api-keys', authenticateToken, async (req: any, res: any) => {
   try {
-    const { provider, name, encrypted_key, encryption_iv, monthly_limit, cost_per_million_tokens, notes } = req.body;
+    const { provider, name, api_key, encrypted_key, monthly_limit, cost_per_million_tokens, notes } = req.body;
+    if (!provider || !api_key && !encrypted_key) return res.status(400).json({ error: 'Provedor e chave de API são obrigatórios.' });
+    const rawKey = api_key || Buffer.from(String(encrypted_key), 'base64').toString('utf8');
+    if (!rawKey || rawKey.length < 8) return res.status(400).json({ error: 'Chave de API inválida.' });
+    const encrypted = encryptApiSecret(rawKey);
     const result = await query(
       `INSERT INTO user_api_keys (user_id, provider, name, encrypted_key, encryption_iv, monthly_limit, cost_per_million_tokens, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [req.userId, provider, name, encrypted_key, encryption_iv, monthly_limit || 1000, cost_per_million_tokens || 0, notes || '']
+      [req.userId, provider, name || `${provider} Key`, encrypted.encrypted, encrypted.iv, monthly_limit || 1000, cost_per_million_tokens || 0, notes || '']
     );
-    return res.status(201).json({ data: result.rows[0] });
+    return res.status(201).json({ data: mapApiKeyMetadata(result.rows[0]) });
   } catch (error: any) {
-    return res.status(500).json({ error: 'Erro ao criar API key: ' + error.message });
+    return res.status(500).json({ error: 'Erro ao criar API key.' });
   }
 });
 
@@ -394,7 +669,7 @@ app.put('/api/api-keys/:id', authenticateToken, async (req: any, res: any) => {
       [name, is_active, is_default, monthly_limit, notes, id, req.userId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'API key não encontrada' });
-    return res.json({ data: result.rows[0] });
+    return res.json({ data: mapApiKeyMetadata(result.rows[0]) });
   } catch {
     return res.status(500).json({ error: 'Erro ao atualizar API key' });
   }
@@ -406,6 +681,108 @@ app.delete('/api/api-keys/:id', authenticateToken, async (req: any, res: any) =>
     return res.json({ message: 'API key removida com sucesso' });
   } catch {
     return res.status(500).json({ error: 'Erro ao remover API key' });
+  }
+});
+
+// ---- PROXY SEGURO DE IA ----
+// As chaves ficam cifradas no banco e são decriptadas somente no runtime do servidor.
+const LLM_PROVIDERS: Record<string, { endpoint: string; defaultModel: string }> = {
+  cerebras: { endpoint: 'https://api.cerebras.ai/v1/chat/completions', defaultModel: 'llama-3.3-70b' },
+  deepseek: { endpoint: 'https://api.deepseek.com/v1/chat/completions', defaultModel: 'deepseek-chat' },
+  groq: { endpoint: 'https://api.groq.com/openai/v1/chat/completions', defaultModel: 'llama-3.1-8b-instant' },
+  qwen: { endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', defaultModel: 'qwen-turbo' },
+  openai: { endpoint: 'https://api.openai.com/v1/chat/completions', defaultModel: 'gpt-4o-mini' },
+};
+
+async function getUsableApiKey(userId: string, provider: string) {
+  const keyResult = await query(
+    `SELECT id, encrypted_key, encryption_iv, monthly_limit, current_month_usage
+     FROM user_api_keys WHERE user_id = $1 AND provider = $2 AND is_active = true
+     ORDER BY is_default DESC, created_at ASC LIMIT 1`,
+    [userId, provider]
+  );
+  if (keyResult.rows.length === 0) return null;
+  const key = keyResult.rows[0];
+  if (key.monthly_limit > 0 && key.current_month_usage >= key.monthly_limit) {
+    throw new Error('O limite mensal configurado para este provedor foi atingido.');
+  }
+  return { id: key.id, secret: decryptApiSecret(key.encrypted_key, key.encryption_iv) };
+}
+
+async function registerServerUsage(userId: string, apiKeyId: string, provider: string, model: string, startedAt: number, payload: any, errorMessage?: string) {
+  const tokens = Number(payload?.usage?.total_tokens || 0);
+  const duration = Date.now() - startedAt;
+  await query(
+    `INSERT INTO user_api_usage_logs (user_id, api_key_id, provider, tokens_used, cost_usd, duration_ms, model_used, success, error_message, request_type)
+     VALUES ($1, $2, $3, $4, 0, $5, $6, $7, $8, 'generation')`,
+    [userId, apiKeyId, provider, tokens, duration, model, !errorMessage, errorMessage || null]
+  ).catch(() => undefined);
+  await query(
+    `UPDATE user_api_keys SET current_month_usage = current_month_usage + 1, usage_count = usage_count + 1,
+     total_tokens_used = total_tokens_used + $1, last_used_at = NOW() WHERE id = $2 AND user_id = $3`,
+    [tokens, apiKeyId, userId]
+  ).catch(() => undefined);
+}
+
+app.post('/api/ai/chat', authenticateToken, async (req: any, res: any) => {
+  const startedAt = Date.now();
+  let key: { id: string; secret: string } | null = null;
+  let provider = '';
+  let model = '';
+  try {
+    provider = String(req.body?.provider || '').toLowerCase();
+    const config = LLM_PROVIDERS[provider];
+    if (!config) return res.status(400).json({ error: 'Provedor de IA não suportado.' });
+    const system = String(req.body?.system || '').slice(0, 12000);
+    const prompt = String(req.body?.prompt || '');
+    if (!prompt.trim()) return res.status(400).json({ error: 'O conteúdo para geração é obrigatório.' });
+    if (prompt.length > 180000) return res.status(413).json({ error: 'O conteúdo é grande demais para processamento seguro. Divida o documento em partes menores.' });
+    model = String(req.body?.model || config.defaultModel).slice(0, 100);
+    key = await getUsableApiKey(req.userId, provider);
+    if (!key) return res.status(409).json({ error: `Configure uma API key ativa para ${provider} antes de gerar o round.` });
+    const upstream = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key.secret}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
+        temperature: Math.min(Math.max(Number(req.body?.temperature ?? 0.3), 0), 1),
+        max_tokens: Math.min(Math.max(Number(req.body?.max_tokens ?? 8000), 256), 8000),
+      }),
+    });
+    const payload = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      await registerServerUsage(req.userId, key.id, provider, model, startedAt, payload, `Upstream HTTP ${upstream.status}`);
+      return res.status(502).json({ error: 'O provedor de IA não conseguiu processar esta solicitação. Tente novamente ou confira a chave configurada.' });
+    }
+    const content = payload?.choices?.[0]?.message?.content;
+    if (!content) return res.status(502).json({ error: 'O provedor retornou uma resposta vazia. Tente novamente.' });
+    await registerServerUsage(req.userId, key.id, provider, model, startedAt, payload);
+    return res.json({ content, provider, model, usage: payload.usage || null });
+  } catch (error: any) {
+    if (key) await registerServerUsage(req.userId, key.id, provider, model, startedAt, null, error?.message || 'Erro interno');
+    console.error('Falha no proxy de IA:', error?.message);
+    return res.status(500).json({ error: 'Não foi possível processar a geração com segurança.' });
+  }
+});
+
+app.post('/api/ai/transcribe', authenticateToken, upload.single('file'), async (req: any, res: any) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Envie um arquivo de áudio.' });
+    const key = await getUsableApiKey(req.userId, 'groq');
+    if (!key) return res.status(409).json({ error: 'Configure uma API key Groq ativa para transcrever áudio.' });
+    const form = new FormData();
+    form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/mpeg' }), req.file.originalname);
+    form.append('model', 'whisper-large-v3');
+    form.append('language', 'pt');
+    form.append('response_format', 'text');
+    const upstream = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${key.secret}` }, body: form });
+    if (!upstream.ok) return res.status(502).json({ error: 'A transcrição de áudio não foi concluída pelo provedor.' });
+    const text = await upstream.text();
+    return res.json({ text, source: req.file.originalname });
+  } catch (error: any) {
+    console.error('Falha na transcrição segura:', error?.message);
+    return res.status(500).json({ error: 'Não foi possível transcrever este áudio.' });
   }
 });
 
@@ -619,14 +996,20 @@ app.post('/api/extract-text', authenticateToken, upload.single('file'), async (r
     const { originalname, buffer, mimetype } = req.file;
     const ext = originalname.split('.').pop()?.toLowerCase() || '';
 
-    // PDF
+    // PDF: usa a API v2 do pdf-parse, compatível com runtime Node/serverless.
     if (ext === 'pdf' || mimetype === 'application/pdf') {
+      let parser: PDFParse | null = null;
       try {
-        const pdfParse = (await import('pdf-parse')).default;
-        const data = await pdfParse(buffer);
-        return res.json({ text: data.text, pages: data.numpages, source: originalname });
+        parser = new PDFParse({ data: buffer });
+        const data = await parser.getText();
+        const text = data.text?.trim() || '';
+        if (!text) return res.status(422).json({ error: 'Não foi possível localizar texto neste PDF. Se ele for uma imagem digitalizada, envie uma transcrição ou use um PDF com texto selecionável.' });
+        return res.json({ text, pages: data.total, source: originalname });
       } catch (pdfErr: any) {
-        return res.status(500).json({ error: `Erro ao processar PDF: ${pdfErr.message}` });
+        console.error('Falha na extração de PDF:', pdfErr?.message);
+        return res.status(422).json({ error: 'Não foi possível processar este PDF. Verifique se o arquivo não está protegido por senha ou corrompido.' });
+      } finally {
+        await parser?.destroy().catch(() => undefined);
       }
     }
 
@@ -1163,14 +1546,14 @@ app.delete('/api/rag/index', authenticateToken, async (req: any, res: any) => {
 // ROTAS: SISOP — VERSÕES E ATUALIZAÇÕES
 // ============================================================
 
-app.get('/api/sisop/versions', authenticateToken, async (req: any, res: any) => {
+app.get('/api/sisop/versions', authenticateToken, requireRole('sisop', 'admin'), async (req: any, res: any) => {
   try {
     const result = await query('SELECT * FROM system_versions ORDER BY component ASC');
     return res.json(result.rows);
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
 
-app.post('/api/sisop/check-updates', authenticateToken, async (req: any, res: any) => {
+app.post('/api/sisop/check-updates', authenticateToken, requireRole('sisop', 'admin'), async (req: any, res: any) => {
   try {
     const updates: any[] = [];
     try {
@@ -1191,13 +1574,15 @@ app.post('/api/sisop/check-updates', authenticateToken, async (req: any, res: an
         updates.push({ component: 'pgvector', latest: latestVersion });
       }
     } catch (_) {}
-    await query('UPDATE system_versions SET last_checked=NOW() WHERE last_checked IS NULL');
+    // A ausência de release pública não pode manter uma data antiga na interface.
+    // O painel diferencia “sem atualização disponível” de “nunca verificado”.
+    await query('UPDATE system_versions SET last_checked=NOW()');
     const result = await query('SELECT * FROM system_versions ORDER BY component ASC');
-    return res.json({ checked: updates.length, versions: result.rows });
+    return res.json({ checked: updates.length, versions: result.rows, checked_at: new Date().toISOString() });
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
 
-app.get('/api/sisop/backups', authenticateToken, async (req: any, res: any) => {
+app.get('/api/sisop/backups', authenticateToken, requireRole('sisop', 'admin'), async (req: any, res: any) => {
   try {
     const result = await query(`SELECT id,backup_date,total_chunks,total_size_bytes,filename,status FROM rag_backups WHERE user_id=$1 ORDER BY backup_date DESC LIMIT 20`, [req.userId]);
     return res.json(result.rows);

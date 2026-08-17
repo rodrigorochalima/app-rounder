@@ -6,9 +6,10 @@
 import { useState, useEffect } from 'react';
 import { 
   X, User, Lock, Key, FileText, Settings, 
-  Upload, Eye, EyeOff, Save, Camera 
+  Upload, Eye, EyeOff, Save, Camera, Download, LogOut, ShieldAlert, Trash2
 } from 'lucide-react';
 import { authService } from '@/services/auth';
+import { accountAPI, legalAPI } from '@/lib/api';
 import APIManager from '../APIManager/APIManager';
 import { TemplateEditor, TemplateData } from '../TemplateEditor/TemplateEditor';
 import './ProfilePanel.css';
@@ -47,6 +48,13 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
+  // Privacidade, sessões e controle de conta
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [legalAcceptances, setLegalAcceptances] = useState<any[]>([]);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+
   useEffect(() => {
     loadUserData();
   }, []);
@@ -60,7 +68,7 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
         setSpecialty(session.user.specialty || '');
         setCrm(session.user.crm || '');
         setCrmState(session.user.crmState || '');
-        setInstitution(session.user.institution || '');
+        setInstitution(session.user.hospitalName || '');
         setPhone(session.user.phone || '');
         setLogoUrl(session.user.logoUrl || '');
         setHospitalName(session.user.hospitalName || '');
@@ -85,9 +93,8 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
         specialty,
         crm,
         crmState,
-        institution,
         phone,
-        hospitalName,
+        hospitalName: hospitalName || institution,
         hospitalPhone,
         position,
         personalPhone
@@ -113,22 +120,92 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
       return;
     }
 
-    if (newPassword.length < 6) {
-      setError('A senha deve ter no mínimo 6 caracteres');
+    if (newPassword.length < 10) {
+      setError('A senha deve ter no mínimo 10 caracteres');
       setLoading(false);
       return;
     }
 
     try {
-      await authService.changePassword(currentPassword, newPassword);
-      setSuccess('Senha alterada com sucesso!');
+      await authService.updatePassword(currentPassword, newPassword);
+      setSuccess('Senha alterada. Por segurança, entre novamente em todos os dispositivos.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setTimeout(() => setSuccess(''), 3000);
+      window.setTimeout(() => { window.location.href = '/auth'; }, 1400);
     } catch (err: any) {
       setError(err.message || 'Erro ao alterar senha');
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadPrivacyControls = async () => {
+    try {
+      const [activeSessions, legalData] = await Promise.all([
+        authService.listSessions(),
+        legalAPI.listAcceptances(),
+      ]);
+      setSessions(activeSessions);
+      setLegalAcceptances(legalData.data || []);
+    } catch (err) {
+      console.error('Erro ao carregar controles de privacidade:', err);
+    }
+  };
+
+  const handleExportData = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const payload = await accountAPI.exportData();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `app-rounder-meus-dados-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setSuccess('Exportação preparada. O download foi iniciado.');
+    } catch (err: any) {
+      setError(err.message || 'Não foi possível exportar seus dados.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogoutAll = async () => {
+    setLoading(true);
+    try {
+      await authService.logoutAll();
+      window.location.href = '/auth';
+    } catch (err: any) {
+      setError(err.message || 'Não foi possível encerrar as sessões.');
+      setLoading(false);
+    }
+  };
+
+  const handleAcceptLegal = async (documentType: 'terms' | 'privacy' | 'clinical_ai_notice') => {
+    setLoading(true);
+    try {
+      await legalAPI.accept(documentType);
+      await loadPrivacyControls();
+      setSuccess('Aceite registrado com sucesso.');
+    } catch (err: any) {
+      setError(err.message || 'Não foi possível registrar o aceite.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      await accountAPI.deleteAccount(deletePassword, deleteConfirmation);
+      window.location.href = '/auth';
+    } catch (err: any) {
+      setError(err.message || 'Não foi possível excluir a conta.');
       setLoading(false);
     }
   };
@@ -181,6 +258,10 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (activeTab === 'settings') loadPrivacyControls();
+  }, [activeTab]);
 
   const tabs = [
     { id: 'personal' as Tab, label: 'Dados Pessoais', icon: User },
@@ -417,7 +498,7 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="••••••••"
                     required
-                    minLength={6}
+                    minLength={10}
                   />
                   <button
                     type="button"
@@ -427,7 +508,7 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
                     {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
-                <small>Mínimo de 6 caracteres</small>
+                <small>Mínimo de 10 caracteres. Ao confirmar, todas as sessões serão encerradas.</small>
               </div>
 
               {/* Confirmar Nova Senha */}
@@ -461,7 +542,7 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
           {/* Aba: APIs */}
           {activeTab === 'apis' && (
             <div className="profile-panel-apis">
-              <APIManager onClose={() => {}} embedded />
+              <APIManager onClose={() => {}} />
             </div>
           )}
 
@@ -472,14 +553,57 @@ export function ProfilePanel({ onClose }: ProfilePanelProps) {
             </div>
           )}
 
-          {/* Aba: Configurações */}
+          {/* Aba: Privacidade e conta */}
           {activeTab === 'settings' && (
-            <div className="profile-panel-settings">
-              <h3>Configurações</h3>
-              <p className="profile-panel-placeholder">
-                🚧 Em desenvolvimento<br />
-                Aqui você poderá configurar tema, idioma, notificações e outras preferências.
-              </p>
+            <div className="profile-panel-settings" style={{ display: 'grid', gap: 18 }}>
+              <div>
+                <h3 style={{ marginBottom: 6 }}>Privacidade e conta</h3>
+                <p style={{ marginTop: 0, color: '#5c7080', lineHeight: 1.5 }}>Controle suas sessões, seus dados e os documentos aceitos. Dados clínicos devem ser revisados e usados conforme as políticas da instituição.</p>
+              </div>
+
+              <section style={{ border: '1px solid #dce8f3', borderRadius: 10, padding: 16 }}>
+                <h4 style={{ marginTop: 0 }}>Sessões ativas</h4>
+                <p style={{ fontSize: 13, color: '#5c7080' }}>{sessions.length ? `${sessions.length} sessão(ões) ativa(s) identificada(s).` : 'Nenhuma sessão ativa adicional identificada.'}</p>
+                <button type="button" className="profile-panel-btn-primary" onClick={handleLogoutAll} disabled={loading} style={{ background: '#496b82' }}>
+                  <LogOut size={18} /> Encerrar todas as sessões
+                </button>
+              </section>
+
+              <section style={{ border: '1px solid #dce8f3', borderRadius: 10, padding: 16 }}>
+                <h4 style={{ marginTop: 0 }}>Seus dados</h4>
+                <p style={{ fontSize: 13, color: '#5c7080', lineHeight: 1.5 }}>Baixe um arquivo JSON com perfil, regras, histórico, contexto clínico, instituições e metadados de chaves. Chaves secretas não são incluídas.</p>
+                <button type="button" className="profile-panel-btn-primary" onClick={handleExportData} disabled={loading}>
+                  <Download size={18} /> Exportar meus dados
+                </button>
+              </section>
+
+              <section style={{ border: '1px solid #dce8f3', borderRadius: 10, padding: 16 }}>
+                <h4 style={{ marginTop: 0 }}>Documentos e aceites</h4>
+                <p style={{ fontSize: 13, color: '#5c7080' }}>Últimos aceites registrados: {legalAcceptances.length || 'nenhum'}.</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <a href="/legal/terms" target="_blank" rel="noreferrer">Termos de Uso</a>
+                  <a href="/legal/privacy" target="_blank" rel="noreferrer">Política de Privacidade</a>
+                  <a href="/legal/clinical-ai" target="_blank" rel="noreferrer">Aviso clínico e IA</a>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                  <button type="button" onClick={() => handleAcceptLegal('terms')} disabled={loading}>Registrar aceite dos Termos</button>
+                  <button type="button" onClick={() => handleAcceptLegal('privacy')} disabled={loading}>Registrar aceite de Privacidade</button>
+                </div>
+              </section>
+
+              <section style={{ border: '1px solid #f0c7c7', background: '#fff8f8', borderRadius: 10, padding: 16 }}>
+                <h4 style={{ marginTop: 0, color: '#a52e2e' }}><ShieldAlert size={17} style={{ verticalAlign: 'text-bottom' }} /> Zona de exclusão</h4>
+                <p style={{ fontSize: 13, color: '#6f3a3a', lineHeight: 1.5 }}>A exclusão remove a conta e os dados associados. Essa ação é irreversível. Exporte os dados antes de continuar.</p>
+                {!showDeleteAccount ? (
+                  <button type="button" onClick={() => setShowDeleteAccount(true)} style={{ color: '#a52e2e' }}><Trash2 size={16} /> Excluir minha conta</button>
+                ) : (
+                  <form onSubmit={handleDeleteAccount} style={{ display: 'grid', gap: 10 }}>
+                    <input type="password" required placeholder="Digite sua senha atual" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} />
+                    <input type="text" required placeholder="Digite EXCLUIR MINHA CONTA" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} />
+                    <button type="submit" disabled={loading} style={{ background: '#a52e2e', color: '#fff' }}>Confirmar exclusão irreversível</button>
+                  </form>
+                )}
+              </section>
             </div>
           )}
         </div>

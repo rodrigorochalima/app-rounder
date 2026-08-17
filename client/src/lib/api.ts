@@ -13,14 +13,17 @@ export function getAccessToken(): string | null {
   return localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
 }
 
+// O refresh token fica somente no cookie HttpOnly. Esta função existe apenas para
+// limpar tokens legados de versões anteriores do aplicativo.
 export function getRefreshToken(): string | null {
-  return localStorage.getItem('refresh_token') || sessionStorage.getItem('refresh_token');
+  return null;
 }
 
-export function setTokens(accessToken: string, refreshToken: string, remember = true) {
+export function setTokens(accessToken: string, _refreshToken?: string, remember = true) {
   const storage = remember ? localStorage : sessionStorage;
   storage.setItem('access_token', accessToken);
-  storage.setItem('refresh_token', refreshToken);
+  localStorage.removeItem('refresh_token');
+  sessionStorage.removeItem('refresh_token');
 }
 
 export function clearTokens() {
@@ -53,6 +56,7 @@ async function request<T>(
   const response = await fetch(`${API_BASE}${path}`, {
     method,
     headers,
+    credentials: 'include',
     body: body ? JSON.stringify(body) : undefined,
   });
 
@@ -64,6 +68,7 @@ async function request<T>(
       const retry = await fetch(`${API_BASE}${path}`, {
         method,
         headers,
+        credentials: 'include',
         body: body ? JSON.stringify(body) : undefined,
       });
       if (!retry.ok) {
@@ -87,18 +92,16 @@ async function request<T>(
 }
 
 async function tryRefreshToken(): Promise<boolean> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return false;
   try {
     const res = await fetch(`${API_BASE}/api/auth/refresh`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
     });
     if (!res.ok) return false;
     const data = await res.json();
-    const remember = !!localStorage.getItem('refresh_token');
-    setTokens(data.accessToken, refreshToken, remember);
+    const remember = !!localStorage.getItem('access_token');
+    setTokens(data.accessToken, undefined, remember);
     return true;
   } catch {
     return false;
@@ -110,21 +113,29 @@ async function tryRefreshToken(): Promise<boolean> {
 // ============================================================
 
 export const authAPI = {
-  async signup(email: string, password: string, fullName?: string) {
-    return request<any>('POST', '/api/auth/signup', { email, password, fullName }, false);
+  async signup(email: string, password: string, fullName?: string, rememberMe = true) {
+    return request<any>('POST', '/api/auth/signup', { email, password, fullName, rememberMe }, false);
   },
 
-  async login(email: string, password: string) {
-    return request<any>('POST', '/api/auth/login', { email, password }, false);
+  async login(email: string, password: string, rememberMe = true) {
+    return request<any>('POST', '/api/auth/login', { email, password, rememberMe }, false);
   },
 
-  async logout(refreshToken?: string) {
+  async logout() {
     try {
-      await request<any>('POST', '/api/auth/logout', { refreshToken });
+      await request<any>('POST', '/api/auth/logout');
     } catch {
-      // Ignorar erros no logout
+      // Ignorar erros no logout: o estado local sempre é removido.
     }
     clearTokens();
+  },
+
+  async logoutAll() {
+    return request<any>('POST', '/api/auth/logout-all');
+  },
+
+  async sessions() {
+    return request<any>('GET', '/api/auth/sessions');
   },
 
   async me() {
@@ -138,6 +149,10 @@ export const authAPI = {
   async resetPassword(email: string) {
     return request<any>('POST', '/api/auth/reset-password', { email }, false);
   },
+
+  async confirmResetPassword(token: string, newPassword: string) {
+    return request<any>('POST', '/api/auth/reset-password/confirm', { token, newPassword }, false);
+  },
 };
 
 // ============================================================
@@ -147,6 +162,24 @@ export const authAPI = {
 export const profileAPI = {
   async update(updates: any) {
     return request<any>('PUT', '/api/profile', updates);
+  },
+};
+
+export const legalAPI = {
+  async accept(documentType: 'terms' | 'privacy' | 'clinical_ai_notice') {
+    return request<any>('POST', '/api/legal/acceptance', { document_type: documentType });
+  },
+  async listAcceptances() {
+    return request<any>('GET', '/api/legal/acceptances');
+  },
+};
+
+export const accountAPI = {
+  async exportData() {
+    return request<any>('GET', '/api/account/export');
+  },
+  async deleteAccount(currentPassword: string, confirmation: string) {
+    return request<any>('DELETE', '/api/account', { currentPassword, confirmation });
   },
 };
 

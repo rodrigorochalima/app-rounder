@@ -2,7 +2,7 @@
  * Serviço de Autenticação
  * Usa a API REST própria com Neon PostgreSQL (sem Supabase)
  */
-import { authAPI, profileAPI, setTokens, clearTokens, getRefreshToken } from '@/lib/api';
+import { authAPI, profileAPI, setTokens, clearTokens } from '@/lib/api';
 import type {
   User,
   AuthSession,
@@ -19,12 +19,12 @@ import type {
  */
 export async function login(credentials: LoginCredentials): Promise<AuthSession> {
   const { email, password, rememberMe } = credentials;
-  const data = await authAPI.login(email, password);
-  setTokens(data.accessToken, data.refreshToken, rememberMe !== false);
+  const data = await authAPI.login(email, password, rememberMe !== false);
+  setTokens(data.accessToken, undefined, rememberMe !== false);
   return {
     user: data.user,
     accessToken: data.accessToken,
-    refreshToken: data.refreshToken,
+    refreshToken: '',
     expiresAt: data.expiresAt,
   };
 }
@@ -34,12 +34,12 @@ export async function login(credentials: LoginCredentials): Promise<AuthSession>
  */
 export async function signup(signupData: SignupData): Promise<AuthSession> {
   const { email, password, fullName } = signupData;
-  const data = await authAPI.signup(email, password, fullName);
-  setTokens(data.accessToken, data.refreshToken, true);
+  const data = await authAPI.signup(email, password, fullName, true);
+  setTokens(data.accessToken, undefined, true);
   return {
     user: data.user,
     accessToken: data.accessToken,
-    refreshToken: data.refreshToken,
+    refreshToken: '',
     expiresAt: data.expiresAt,
   };
 }
@@ -48,8 +48,7 @@ export async function signup(signupData: SignupData): Promise<AuthSession> {
  * Faz logout do usuário
  */
 export async function logout(): Promise<void> {
-  const refreshToken = getRefreshToken();
-  await authAPI.logout(refreshToken || undefined);
+  await authAPI.logout();
   clearTokens();
 }
 
@@ -63,8 +62,8 @@ export async function requestPasswordReset(request: PasswordResetRequest): Promi
 /**
  * Confirma reset de senha (placeholder)
  */
-export async function confirmPasswordReset(_confirm: PasswordResetConfirm): Promise<void> {
-  throw new Error('Redefinição via link não disponível nesta versão. Use a opção de alterar senha no perfil.');
+export async function confirmPasswordReset(confirm: PasswordResetConfirm): Promise<void> {
+  await authAPI.confirmResetPassword(confirm.token, confirm.newPassword);
 }
 
 /**
@@ -89,12 +88,11 @@ export async function getCurrentSession(): Promise<AuthSession | null> {
     const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
     if (!token) return null;
     const data = await authAPI.me();
-    const refreshToken = localStorage.getItem('refresh_token') || sessionStorage.getItem('refresh_token') || '';
     return {
       user: data.user,
       accessToken: token,
-      refreshToken,
-      expiresAt: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60,
+      refreshToken: '',
+      expiresAt: Math.floor(Date.now() / 1000) + 15 * 60,
     };
   } catch {
     clearTokens();
@@ -127,6 +125,17 @@ export async function updateUserProfile(updates: Partial<User>): Promise<User> {
  */
 export async function updatePassword(currentPassword: string, newPassword: string): Promise<void> {
   await authAPI.updatePassword(currentPassword, newPassword);
+  clearTokens();
+}
+
+export async function listSessions() {
+  const data = await authAPI.sessions();
+  return data.data || [];
+}
+
+export async function logoutAll(): Promise<void> {
+  await authAPI.logoutAll();
+  clearTokens();
 }
 
 export const authService = {
@@ -140,4 +149,6 @@ export const authService = {
   getCurrentSession,
   updateUserProfile,
   updatePassword,
+  listSessions,
+  logoutAll,
 };

@@ -4,6 +4,7 @@
  */
 
 import { MEDICAMENTOS_SUS, SIGLAS_UTI, PROCEDIMENTOS_UTI, CORRECOES_COMUNS } from './dicionario-uti-sus';
+import { secureChat } from './server-ai.service';
 
 export interface ResultadoValidacao {
   documentoCorrigido: string;
@@ -21,46 +22,22 @@ export interface Correcao {
 /**
  * Valida e corrige terminologia médica no documento
  */
-export async function validarTerminologiaMedica(
-  documento: string,
-  groqApiKey: string
-): Promise<ResultadoValidacao> {
+export async function validarTerminologiaMedica(documento: string): Promise<ResultadoValidacao> {
   const inicio = Date.now();
 
   try {
     // Montar prompt para o Groq
     const prompt = montarPromptValidacao(documento);
 
-    // Chamar Groq LLaMA 3.1 8B
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${groqApiKey}`
-      },
-      body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        messages: [
-          {
-            role: 'system',
-            content: SYSTEM_PROMPT_VALIDADOR
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.1, // Baixa temperatura para precisão
-        max_tokens: 8000
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Erro na API Groq: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    const documentoCorrigido = data.choices[0].message.content.trim();
+    // A chave Groq permanece no servidor; o navegador recebe somente o texto final.
+    const documentoCorrigido = (await secureChat({
+      provider: 'groq',
+      model: 'llama-3.1-8b-instant',
+      system: SYSTEM_PROMPT_VALIDADOR,
+      prompt,
+      temperature: 0.1,
+      maxTokens: 8000,
+    })).trim();
 
     // Detectar correções feitas
     const correcoes = detectarCorrecoes(documento, documentoCorrigido);

@@ -4,66 +4,29 @@
 
 // DeepSeek não precisa de biblioteca externa, usa fetch direto
 import { validarTerminologiaMedica, formatarRelatorioCorrecoes } from './validador-medico';
-import { buscarRegrasAtivas } from './supabase';
+import { secureChat, secureTranscription } from './server-ai.service';
+import { roundRulesAPI } from './api';
 
 // ============================================
 // CEREBRAS API (AGENTE 1 - Processamento)
 // ============================================
 
 export class CerebrasAgent {
-  private apiKey: string;
-  private baseURL = 'https://api.cerebras.ai/v1';
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
   async processar(prompt: string, onProgress?: (progress: number, message: string) => void): Promise<string> {
+    if (onProgress) onProgress(30, '🤖 Processando com Cerebras...');
     try {
-      if (onProgress) onProgress(30, '🤖 AGENTE 1: Processando com Cerebras...');
-
-      console.log('[CEREBRAS] Iniciando requisição...');
-      console.log('[CEREBRAS] API Key:', this.apiKey.substring(0, 10) + '...');
-
-      const response = await fetch(`${this.baseURL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b',
-          messages: [
-            {
-              role: 'system',
-              content: 'Você é um assistente médico especializado em rounds de UTI. Analise leito por leito com precisão.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.3,
-          max_tokens: 8000,
-        }),
+      const resultado = await secureChat({
+        provider: 'cerebras',
+        model: 'llama-3.3-70b',
+        system: 'Você é um assistente médico especializado em rounds de UTI. Analise leito por leito com precisão.',
+        prompt,
+        temperature: 0.3,
+        maxTokens: 8000,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[CEREBRAS] Erro HTTP:', response.status, response.statusText);
-        console.error('[CEREBRAS] Resposta:', errorText);
-        throw new Error(`Cerebras Error [${response.status}]: ${errorText}`);
-      }
-
-      const data = await response.json();
-      const resultado = data.choices[0].message.content;
-
-      if (onProgress) onProgress(60, '✅ AGENTE 1: Processamento concluído!');
-
+      if (onProgress) onProgress(60, '✅ Processamento concluído!');
       return resultado;
     } catch (error: any) {
-      console.error('[CEREBRAS] Erro completo:', error);
-      throw new Error(`Erro no Cerebras: ${error.message}`);
+      throw new Error(`Erro no processamento principal: ${error.message}`);
     }
   }
 }
@@ -73,79 +36,22 @@ export class CerebrasAgent {
 // ============================================
 
 export class DeepSeekAgent {
-  private apiKey: string;
-  private baseURL = 'https://api.deepseek.com/v1';
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
   async validar(documentoBruto: string, onProgress?: (progress: number, message: string) => void): Promise<string> {
+    if (onProgress) onProgress(70, '🔍 Validando estrutura clínica...');
+    const prompt = `Revise o documento abaixo. Preserve nomes, leitos, cores e contadores; corrija apenas incoerências de estrutura e formatação. Retorne somente o documento final.\n\nDOCUMENTO:\n${documentoBruto}`;
     try {
-      if (onProgress) onProgress(70, '🔍 AGENTE 2: Validando com DeepSeek...');
-
-      console.log('[DEEPSEEK] Iniciando validação...');
-      console.log('[DEEPSEEK] API Key:', this.apiKey.substring(0, 10) + '...');
-
-      const prompt = `
-Você é um validador de documentos médicos. Analise o documento abaixo e:
-
-1. Verifique se todas as cores estão corretas (vermelho/amarelo/verde)
-2. Confirme se os contadores estão incrementados (D0→D1→D2)
-3. Valide a estrutura e formatação
-4. Corrija pequenos erros se necessário
-5. Retorne o documento final validado
-
-DOCUMENTO:
-${documentoBruto}
-
-Retorne APENAS o documento corrigido, sem explicações adicionais.
-`;
-
-      const response = await fetch(`${this.baseURL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages: [
-            {
-              role: 'system',
-              content: 'Você é um validador de documentos médicos especializado em rounds de UTI.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.3,
-          max_tokens: 8000,
-        }),
+      const documentoFinal = await secureChat({
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        system: 'Você é um validador de documentos médicos especializado em rounds de UTI.',
+        prompt,
+        temperature: 0.3,
+        maxTokens: 8000,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[DEEPSEEK] Erro HTTP:', response.status, response.statusText);
-        console.error('[DEEPSEEK] Resposta:', errorText);
-        throw new Error(`DeepSeek Error [${response.status}]: ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log('[DEEPSEEK] Resposta recebida');
-      
-      const documentoFinal = data.choices[0].message.content;
-      console.log('[DEEPSEEK] Documento validado com sucesso');
-
-      if (onProgress) onProgress(90, '✅ AGENTE 2: Validação concluída!');
-
+      if (onProgress) onProgress(90, '✅ Validação concluída!');
       return documentoFinal;
     } catch (error: any) {
-      console.error('[DEEPSEEK] Erro completo:', error);
-      console.error('[DEEPSEEK] Stack:', error.stack);
-      console.error('[DEEPSEEK] Message:', error.message);
-      throw new Error(`Erro no DeepSeek: ${error.message}`);
+      throw new Error(`Erro na validação: ${error.message}`);
     }
   }
 }
@@ -155,40 +61,11 @@ Retorne APENAS o documento corrigido, sem explicações adicionais.
 // ============================================
 
 export class GroqWhisper {
-  private apiKey: string;
-  private baseURL = 'https://api.groq.com/openai/v1';
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
   async transcrever(audioFile: File, onProgress?: (progress: number, message: string) => void): Promise<string> {
+    if (onProgress) onProgress(10, '🎤 Transcrevendo áudio...');
     try {
-      if (onProgress) onProgress(10, '🎤 Transcrevendo áudio...');
-
-      const formData = new FormData();
-      formData.append('file', audioFile);
-      formData.append('model', 'whisper-large-v3');
-      formData.append('language', 'pt');
-      formData.append('response_format', 'text');
-
-      const response = await fetch(`${this.baseURL}/audio/transcriptions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Groq Whisper Error: ${JSON.stringify(error)}`);
-      }
-
-      const transcricao = await response.text();
-
+      const transcricao = await secureTranscription(audioFile);
       if (onProgress) onProgress(20, '✅ Transcrição concluída!');
-
       return transcricao;
     } catch (error: any) {
       throw new Error(`Erro na transcrição: ${error.message}`);
@@ -237,26 +114,19 @@ export class SistemaAprendizado {
   }
 
   async gerarPromptComRegras(): Promise<string> {
-    // Buscar regras do Supabase
-    const regrasSupabase = await buscarRegrasAtivas();
-    
-    // Buscar regras do localStorage (legado)
-    const regrasLocal = this.obterRegras();
-    
-    // Combinar todas as regras
-    const todasRegras = [...regrasSupabase, ...regrasLocal];
-    
+    const resultado = await roundRulesAPI.list().catch(() => ({ data: [] }));
+    const regrasPersistidas = (resultado.data || []).filter((regra: any) => regra.is_active !== false).map((regra: any) => ({
+      tipo: 'preferencia' as const,
+      descricao: regra.rule_text,
+    }));
+    const todasRegras = [...regrasPersistidas, ...this.obterRegras()];
     if (todasRegras.length === 0) return '';
 
-    let prompt = '\n\n## REGRAS APRENDIDAS (SEMPRE SEGUIR):\n\n';
-    
+    let prompt = '\n\n## REGRAS CLÍNICAS E DE FORMATAÇÃO (SEMPRE SEGUIR):\n\n';
     todasRegras.forEach((regra, index) => {
-      prompt += `${index + 1}. [${regra.tipo.toUpperCase()}] ${regra.descricao}\n`;
-      if (regra.exemplo) {
-        prompt += `   Exemplo: ${regra.exemplo}\n`;
-      }
+      prompt += `${index + 1}. ${regra.descricao}\n`;
+      if (regra.exemplo) prompt += `   Exemplo: ${regra.exemplo}\n`;
     });
-
     return prompt;
   }
 }
@@ -270,14 +140,12 @@ export class ProcessadorRound {
   private deepseek: DeepSeekAgent;
   private whisper: GroqWhisper;
   private aprendizado: SistemaAprendizado;
-  private groqKey: string;
 
-  constructor(cerebrasKey: string, deepseekKey: string, groqKey: string) {
-    this.cerebras = new CerebrasAgent(cerebrasKey);
-    this.deepseek = new DeepSeekAgent(deepseekKey);
-    this.whisper = new GroqWhisper(groqKey);
+  constructor() {
+    this.cerebras = new CerebrasAgent();
+    this.deepseek = new DeepSeekAgent();
+    this.whisper = new GroqWhisper();
     this.aprendizado = new SistemaAprendizado();
-    this.groqKey = groqKey;
   }
 
   async processar(
@@ -331,7 +199,7 @@ GERE O ROUND DE HOJE:
       // ETAPA 3: Validação de Terminologia Médica com Groq
       if (onProgress) onProgress(92, '🏥 AGENTE 3: Validando terminologia médica...');
       
-      const resultadoValidacao = await validarTerminologiaMedica(documentoValidado, this.groqKey);
+      const resultadoValidacao = await validarTerminologiaMedica(documentoValidado);
       
       if (onProgress) {
         const relatorio = formatarRelatorioCorrecoes(resultadoValidacao.correcoes);
@@ -388,29 +256,14 @@ Retorne um JSON com as regras no formato:
 Retorne APENAS o JSON, sem explicações.
 `;
 
-      const response = await fetch(`${this.deepseek['baseURL']}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.deepseek['apiKey']}`,
-        },
-        body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages: [
-            { role: 'system', content: 'Você é um assistente que extrai regras de feedbacks médicos.' },
-            { role: 'user', content: promptAnalise }
-          ],
-          temperature: 0.3,
-          max_tokens: 2000,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`DeepSeek Error: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      const regrasJSON = data.choices[0].message.content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const regrasJSON = (await secureChat({
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        system: 'Você é um assistente que extrai regras de feedbacks médicos.',
+        prompt: promptAnalise,
+        temperature: 0.3,
+        maxTokens: 2000,
+      })).replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
       const regras = JSON.parse(regrasJSON);
 

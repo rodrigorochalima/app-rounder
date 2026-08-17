@@ -102,8 +102,43 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   token TEXT UNIQUE NOT NULL,
+  token_hash TEXT,
+  session_id UUID,
   expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ,
+  user_agent TEXT,
+  ip_hash TEXT,
+  last_used_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Migração aditiva para bancos Neon já existentes.
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS token_hash TEXT;
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS session_id UUID;
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS user_agent TEXT;
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS ip_hash TEXT;
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ;
+
+-- ============================================================
+-- TABELAS: PRIVACIDADE, ACEITES E DIREITOS DO TITULAR
+-- ============================================================
+CREATE TABLE IF NOT EXISTS legal_acceptances (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  document_type TEXT NOT NULL,
+  document_version TEXT NOT NULL,
+  accepted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ip_hash TEXT,
+  user_agent TEXT
+);
+
+CREATE TABLE IF NOT EXISTS account_deletion_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  status TEXT NOT NULL DEFAULT 'confirmed',
+  confirmation_method TEXT NOT NULL DEFAULT 'password'
 );
 
 -- ============================================================
@@ -117,7 +152,11 @@ CREATE INDEX IF NOT EXISTS idx_user_api_usage_logs_user_id ON user_api_usage_log
 CREATE INDEX IF NOT EXISTS idx_round_rules_user_id ON round_rules(user_id);
 CREATE INDEX IF NOT EXISTS idx_round_rules_order ON round_rules(user_id, order_index);
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_refresh_tokens_hash_unique ON refresh_tokens(token_hash) WHERE token_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_active_session ON refresh_tokens(user_id, revoked_at, expires_at);
+CREATE INDEX IF NOT EXISTS idx_legal_acceptances_user_id ON legal_acceptances(user_id, accepted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_account_deletion_requests_user_id ON account_deletion_requests(user_id, requested_at DESC);
 
 -- ============================================================
 -- FUNÇÃO: atualizar updated_at automaticamente

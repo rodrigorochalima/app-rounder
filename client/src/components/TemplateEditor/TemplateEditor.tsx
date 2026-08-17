@@ -632,7 +632,7 @@ export function TemplateEditor({ onSave, initialTemplate }: TemplateEditorProps)
     const templateData: TemplateData = {
       name: templateName || 'Novo Template',
       html,
-      css,
+      css: css || '',
       isDefault
     };
 

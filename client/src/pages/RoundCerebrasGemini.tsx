@@ -1,21 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { ProcessadorRound, RegraAprendida } from '../lib/ai-service-v2';
 import { DocxGenerator } from '../lib/docx-generator';
-import { roundRulesAPI } from '../lib/api';
+import { apiKeysAPI, roundRulesAPI } from '../lib/api';
 import mammoth from 'mammoth';
 import { Mic, MicOff, Upload, Download, History, BookOpen, Trash2, X, Brain, CheckCircle } from 'lucide-react';
 import Header from '../components/Header/Header';
-import UserProfile from '../components/UserProfile/UserProfile';
-import APIManager from '../components/APIManager/APIManager';
 import RulesPanel from '../components/RulesPanel/RulesPanel';
 import UniversalInputArea from '../components/UniversalInput/UniversalInputArea';
 import ClinicalContextPanel from '../components/ClinicalContext/ClinicalContextPanel';
 
 export default function RoundCerebrasGemini() {
-  // Estados de configuração
-  const [cerebrasKey, setCerebrasKey] = useState('');
-  const [deepseekKey, setDeepseekKey] = useState('');
-  const [groqKey, setGroqKey] = useState('');
+  // Estado de configuração: o navegador recebe somente metadados, nunca as chaves.
+  const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
+  const requiredProviders = ['cerebras', 'deepseek', 'groq'];
+  const hasRequiredProviders = requiredProviders.every((provider) => configuredProviders.includes(provider));
 
   // Estados de documentos
   const [docAnterior, setDocAnterior] = useState<File | null>(null);
@@ -51,18 +49,11 @@ export default function RoundCerebrasGemini() {
   const audioChunksRef = useRef<Blob[]>([]);
 
   // Estados de modais
-  const [mostrarPerfil, setMostrarPerfil] = useState(false);
-  const [mostrarConfigAPIs, setMostrarConfigAPIs] = useState(false);
   const [mostrarContexto, setMostrarContexto] = useState(false);
 
-  // Carregar API Keys do localStorage
+  // Carregar apenas metadados de configuração; as chaves nunca entram no navegador.
   useEffect(() => {
-    const savedCerebras = localStorage.getItem('cerebras_api_key');
-    const savedDeepSeek = localStorage.getItem('deepseek_api_key');
-    const savedGroq = localStorage.getItem('groq_api_key');
-    if (savedCerebras) setCerebrasKey(savedCerebras);
-    if (savedDeepSeek) setDeepseekKey(savedDeepSeek);
-    if (savedGroq) setGroqKey(savedGroq);
+    carregarConfiguracaoDeIA();
     carregarRegras();
     carregarHistorico();
 
@@ -132,10 +123,21 @@ export default function RoundCerebrasGemini() {
     };
   }, []);
 
+  const carregarConfiguracaoDeIA = async () => {
+    try {
+      const data = await apiKeysAPI.list();
+      const providers: string[] = (data.data || []).filter((key: any) => key.is_active).map((key: any) => String(key.provider));
+      setConfiguredProviders(Array.from(new Set<string>(providers)));
+    } catch (e) {
+      console.error('Erro ao verificar configuração de IA:', e);
+      setConfiguredProviders([]);
+    }
+  };
+
   const carregarRegras = async () => {
     try {
       const data = await roundRulesAPI.list();
-      setRegrasAprendidas((data.rules || []) as any[]);
+      setRegrasAprendidas((data.data || []) as any[]);
     } catch (e) {
       console.error('Erro ao carregar regras:', e);
     }
@@ -159,24 +161,9 @@ export default function RoundCerebrasGemini() {
     }
   };
 
-  const salvarCerebrasKey = (key: string) => {
-    setCerebrasKey(key);
-    if (key) localStorage.setItem('cerebras_api_key', key);
-  };
-
-  const salvarDeepSeekKey = (key: string) => {
-    setDeepseekKey(key);
-    if (key) localStorage.setItem('deepseek_api_key', key);
-  };
-
-  const salvarGroqKey = (key: string) => {
-    setGroqKey(key);
-    if (key) localStorage.setItem('groq_api_key', key);
-  };
-
   // Verificar se pode processar
   const temTranscricao = transcricaoTexto.length > 10 || transcricaoAudio !== null;
-  const podeProcessar = cerebrasKey.length > 10 && deepseekKey.length > 10 && groqKey.length > 10 && docAnterior !== null && temTranscricao;
+  const podeProcessar = hasRequiredProviders && docAnterior !== null && temTranscricao;
 
   // Ler arquivo .docx
   const lerDocx = async (file: File): Promise<string> => {
@@ -217,7 +204,7 @@ export default function RoundCerebrasGemini() {
     setDocumentoGerado('');
 
     try {
-      const processador = new ProcessadorRound(cerebrasKey, deepseekKey, groqKey);
+      const processador = new ProcessadorRound();
 
       // Ler documento anterior
       setMensagemProgresso('📄 Lendo documento anterior...');
@@ -475,7 +462,7 @@ export default function RoundCerebrasGemini() {
           marginBottom: '20px'
         }}>
           {/* Aviso sobre APIs */}
-          {(!cerebrasKey || !deepseekKey || !groqKey) && (
+          {!hasRequiredProviders && (
             <div style={{
               background: '#FFF3CD', border: '1px solid #FFE69C', borderRadius: '8px',
               padding: '14px 16px', marginBottom: '24px',
@@ -657,8 +644,8 @@ export default function RoundCerebrasGemini() {
 
           {!podeProcessar && !processando && (
             <p style={{ textAlign: 'center', fontSize: '12px', color: '#999', margin: '4px 0 0 0' }}>
-              {!cerebrasKey || !deepseekKey || !groqKey
-                ? 'Configure as API Keys para habilitar a geração'
+              {!hasRequiredProviders
+                ? 'Configure chaves ativas para Cerebras, DeepSeek e Groq em 🔑 APIs para habilitar a geração'
                 : !docAnterior
                   ? 'Adicione o documento do round anterior'
                   : 'Adicione a transcrição ou áudio do dia'}
@@ -853,8 +840,6 @@ export default function RoundCerebrasGemini() {
       </div>
 
       {/* Modais */}
-      {mostrarPerfil && <UserProfile onClose={() => setMostrarPerfil(false)} />}
-      {mostrarConfigAPIs && <APIManager onClose={() => setMostrarConfigAPIs(false)} />}
       {mostrarContexto && <ClinicalContextPanel onClose={() => setMostrarContexto(false)} />}
     </div>
   );

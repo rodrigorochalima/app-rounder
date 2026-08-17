@@ -42,7 +42,8 @@ export function useServiceWorker() {
       // Tentar sincronizar
       if ('serviceWorker' in navigator && 'sync' in ServiceWorkerRegistration.prototype) {
         navigator.serviceWorker.ready.then((registration) => {
-          return registration.sync.register('sync-rounds');
+          const backgroundSync = (registration as ServiceWorkerRegistration & { sync?: { register: (tag: string) => Promise<void> } }).sync;
+          return backgroundSync?.register('sync-rounds');
         }).catch((error) => {
           console.error('Erro ao registrar sincronização:', error);
         });

@@ -6,6 +6,11 @@
   "installCommand": "pnpm install",
   "framework": null,
   "public": true,
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "server/schema.sql"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/:path*",

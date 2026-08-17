@@ -16,18 +16,24 @@ export const Header: React.FC = () => {
   const [showDoctorProfile, setShowDoctorProfile] = useState(false);
   const [showSISOP, setShowSISOP] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string>('rotineiro');
   const [hasUpdates, setHasUpdates] = useState(false);
+  const canAccessSisop = ['sisop', 'admin'].includes(userRole);
 
   useEffect(() => {
     loadUserName();
-    checkForUpdates();
   }, []);
+
+  useEffect(() => {
+    if (canAccessSisop) checkForUpdates();
+  }, [canAccessSisop]);
 
   const loadUserName = async () => {
     try {
       const session = await authService.getCurrentSession();
       if (session?.user) {
         setUserName(session.user.fullName || session.user.email);
+        setUserRole(session.user.role || 'rotineiro');
       }
     } catch (error) {
       console.error('Erro ao carregar nome do usuário:', error);
@@ -76,10 +82,12 @@ export const Header: React.FC = () => {
               👨‍⚕️ Médico
             </button>
 
-            <button className="header-btn btn-sisop" onClick={() => setShowSISOP(true)} title="Sistema Operacional">
-              ⚙️ SISOP
-              {hasUpdates && <span className="header-update-dot" />}
-            </button>
+            {canAccessSisop && (
+              <button className="header-btn btn-sisop" onClick={() => setShowSISOP(true)} title="Sistema Operacional">
+                ⚙️ SISOP
+                {hasUpdates && <span className="header-update-dot" />}
+              </button>
+            )}
 
             <button className="header-btn btn-profile" onClick={() => setShowProfile(true)} title="Meu Perfil">
               <div className="profile-avatar-small">
@@ -96,7 +104,7 @@ export const Header: React.FC = () => {
       {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
       {showInstitutions && <InstitutionManager onClose={() => setShowInstitutions(false)} />}
       {showDoctorProfile && <DoctorProfile onClose={() => setShowDoctorProfile(false)} />}
-      {showSISOP && <SISOpPanel onClose={() => { setShowSISOP(false); checkForUpdates(); }} />}
+      {showSISOP && canAccessSisop && <SISOpPanel onClose={() => { setShowSISOP(false); checkForUpdates(); }} />}
     </>
   );
 };

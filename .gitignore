@@ -106,3 +106,6 @@ temp/
 *.sqlite3
 .vercel
 .env*.local
+
+# Evidências locais de testes autenticados
+docs/auditoria/local-*

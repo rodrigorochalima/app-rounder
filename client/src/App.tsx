@@ -5,17 +5,11 @@ import { Route, Switch, Router as WouterRouter } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { AuthProvider } from "./contexts/AuthContext";
-import Home from "./pages/Home";
-import RoundGemini from "./pages/RoundGemini";
-import RoundGroq from "./pages/RoundGroq";
-import RoundGroqPaste from "./pages/RoundGroqPaste";
-import RoundOpenAI from "./pages/RoundOpenAI";
 import RoundCerebrasGemini from "./pages/RoundCerebrasGemini";
-import AdminPanel from "./pages/AdminPanel";
 import AuthCallbackPage from "./pages/AuthCallbackPage";
 import AuthPage from "./pages/AuthPage";
 import ResetPassword from "./pages/ResetPassword";
-import APIKeysPage from "./pages/APIKeysPage";
+import LegalPage from "./pages/LegalPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 function Router() {
@@ -26,47 +20,15 @@ function Router() {
       {/* Rotas públicas (sem proteção) */}
       <Route path={"/auth"} component={AuthPage} />
       <Route path={"/auth/reset-password"} component={ResetPassword} />
-      <Route path="/auth/callback" component={AuthCallbackPage} />
+      <Route path={"/auth/callback"} component={AuthCallbackPage} />
+      <Route path={"/legal/terms"} component={() => <LegalPage document="terms" />} />
+      <Route path={"/legal/privacy"} component={() => <LegalPage document="privacy" />} />
+      <Route path={"/legal/clinical-ai"} component={() => <LegalPage document="clinical-ai" />} />
       
       {/* Rotas protegidas (requerem autenticação) */}
       <Route path={""} component={() => (
         <ProtectedRoute>
           <RoundCerebrasGemini />
-        </ProtectedRoute>
-      )} />
-      <Route path={"/api-keys"} component={() => (
-        <ProtectedRoute>
-          <APIKeysPage />
-        </ProtectedRoute>
-      )} />
-      <Route path="/admin" component={() => (
-        <ProtectedRoute>
-          <AdminPanel />
-        </ProtectedRoute>
-      )} />
-      <Route path={"/openai"} component={() => (
-        <ProtectedRoute>
-          <RoundOpenAI />
-        </ProtectedRoute>
-      )} />
-      <Route path={"/paste"} component={() => (
-        <ProtectedRoute>
-          <RoundGroqPaste />
-        </ProtectedRoute>
-      )} />
-      <Route path={"/upload"} component={() => (
-        <ProtectedRoute>
-          <RoundGroq />
-        </ProtectedRoute>
-      )} />
-      <Route path={"/gemini"} component={() => (
-        <ProtectedRoute>
-          <RoundGemini />
-        </ProtectedRoute>
-      )} />
-      <Route path={"/whatsapp"} component={() => (
-        <ProtectedRoute>
-          <Home />
         </ProtectedRoute>
       )} />
       <Route path={"/404"} component={NotFound} />
