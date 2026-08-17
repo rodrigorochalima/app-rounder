@@ -7,6 +7,7 @@ import express from 'express';
 import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import { existsSync, readFileSync } from 'fs';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -22,6 +23,7 @@ const APP_URL = process.env.APP_URL || 'https://app-rounder.vercel.app';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const nodeRequire = createRequire(import.meta.url);
 
 const configuredJwtSecret = process.env.JWT_SECRET;
 if (process.env.NODE_ENV === 'production' && !configuredJwtSecret) {
@@ -998,8 +1000,8 @@ app.post('/api/extract-text', authenticateToken, upload.single('file'), async (r
     // PDF: o módulo clássico usa PDF.js para Node e não exige APIs gráficas do browser.
     if (ext === 'pdf' || mimetype === 'application/pdf') {
       try {
-        const module = await import('pdf-parse');
-        const pdfParse = (module as any).default || module;
+        // `createRequire` preserva a interface CommonJS do pdf-parse no bundle serverless.
+        const pdfParse = nodeRequire('pdf-parse') as (file: Buffer) => Promise<{ text?: string; numpages?: number }>;
         const data = await pdfParse(buffer);
         const text = String(data.text || '').trim();
         if (!text) return res.status(422).json({ error: 'Não foi possível localizar texto neste PDF. Se ele for uma imagem digitalizada, envie uma transcrição ou use um PDF com texto selecionável.' });
