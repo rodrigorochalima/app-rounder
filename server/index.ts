@@ -14,7 +14,6 @@ import { pool, query } from './db.js';
 import { Resend } from 'resend';
 import multer from 'multer';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
-import { PDFParse } from 'pdf-parse';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -998,8 +997,11 @@ app.post('/api/extract-text', authenticateToken, upload.single('file'), async (r
 
     // PDF: usa a API v2 do pdf-parse, compatível com runtime Node/serverless.
     if (ext === 'pdf' || mimetype === 'application/pdf') {
-      let parser: PDFParse | null = null;
+      let parser: { getText: () => Promise<{ text?: string; total?: number }>; destroy: () => Promise<void> } | null = null;
       try {
+        // Importação tardia: algumas versões do pdf-parse inicializam APIs gráficas
+        // ausentes no runtime serverless se forem carregadas durante o boot da função.
+        const { PDFParse } = await import('pdf-parse');
         parser = new PDFParse({ data: buffer });
         const data = await parser.getText();
         const text = data.text?.trim() || '';

@@ -82,7 +82,8 @@ As credenciais de teste e segredos ficam fora deste arquivo e não devem ser inc
 | Regras e SISOP | Contrato de regras corrigido na tela principal; SISOP restrito por papel no backend e ocultado para usuários não autorizados; data de checagem é renovada mesmo sem release externa. | Contas com papéis distintos e checagem SISOP em produção. |
 | Privacidade e conta | Termos, Política de Privacidade e aviso clínico públicos; aceite versionado; painel com sessões, logout global, exportação e exclusão confirmada; cadastro requer aceite informado. | Persistência de aceite, exportação e exclusão em conta de teste descartável. |
 | Navegação | Rotas antigas, desconectadas e com dependência de Supabase foram removidas da release ativa; a experiência publicada concentra-se no fluxo principal protegido. | Navegação completa no browser após deploy. |
+| Runtime Vercel | O primeiro deploy auditado respondeu `FUNCTION_INVOCATION_FAILED` no login: a importação estática de `pdf-parse` impedia a inicialização da função. A dependência foi deslocada para importação tardia, apenas na rota de PDF. | Deploy corretivo e login/PDF em produção. |
 
 ## Próxima atualização
 
-A próxima etapa é a validação real em ambiente publicado. Não declarar nenhum item pronto antes de registrar evidência de browser e API no relatório final.
+A próxima etapa é a validação real em ambiente publicado. Não declarar nenhum item pronto antes de registrar evidência de browser e API no relatório final. A correção de importação tardia do PDF foi validada localmente contra o Neon: login HTTP 200 e extração do PDF de referência HTTP 200.
